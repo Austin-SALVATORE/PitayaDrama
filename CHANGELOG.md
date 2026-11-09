@@ -102,6 +102,10 @@
 - 修复播放一会后 tvOS 屏保自动弹出：mpv 不是 AVPlayer，系统不知道在播视频；
   播放时禁止系统空闲计时器，暂停 / 停止 / 切后台时恢复。
 
+## 2.42
+
+- 同步上游核心到 Xanerix/guoapp `fa7d948`（docs: #94 换集修复已在 Android 实机验证播放正常，更新日志注明 iPad 待验证）。本次仅更新 Go 核心（submodule 指针），tvOS 应用代码无改动。
+
 ## 2.41
 
 - 修复改倍速要 2～4 秒才生效、期间音画不同步：Apple TV 的 HDMI 输出上 mpv 回退到 avfoundation
