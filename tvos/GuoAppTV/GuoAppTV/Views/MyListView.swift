@@ -15,6 +15,13 @@ struct MyListView: View {
                 }
         }
         .playbackLauncher(launcher)
+        .task {
+            // 开发验证用：启动参数 -GUOAppOpenFollow N 直接打开「我的追剧」第 N 部的详情（只对这次启动有效）。
+            if let index = Int(UserDefaults.standard.string(forKey: "GUOAppOpenFollow") ?? ""),
+               store.follows.indices.contains(index), path.isEmpty {
+                path.append(store.follows[index].drama)
+            }
+        }
     }
 
     @ViewBuilder

@@ -78,6 +78,18 @@ struct SeriesTitleTests {
         #expect(entries.last == .single(Item(title: "别的剧")))
     }
 
+    /// 写明「第一季」的那部是第 1 季，哪怕不带后缀的同名剧排在前面（实测搜「万妖图录传」：不带后缀的
+    /// 「万妖图录传」60 集排第一，之后才是「万妖图录传第一季」81 集——以前第一季被挤成单部剧，进它的详情没有本系列）。
+    @Test func explicitFirstPartBeatsBareTitle() {
+        let entries = group([Item(title: "万妖图录传"), Item(title: "万妖图录传第一季"), Item(title: "万妖图录传第二季")])
+        guard case .series(let series) = entries.first(where: { if case .series = $0 { true } else { false } }) else {
+            Issue.record("expected a series")
+            return
+        }
+        #expect(series.parts.map(\.item.title) == ["万妖图录传第一季", "万妖图录传第二季"])
+        #expect(entries.contains(.single(Item(title: "万妖图录传"))))
+    }
+
     @Test func unitsDontMix() {
         let entries = group([Item(title: "霸总 第二部"), Item(title: "霸总 第二季")])
         #expect(entries == [.single(Item(title: "霸总 第二部")), .single(Item(title: "霸总 第二季"))])
