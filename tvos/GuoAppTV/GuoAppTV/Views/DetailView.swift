@@ -227,7 +227,10 @@ struct DetailView: View {
             SeriesShelf(group: group, currentID: drama.id)
         case .failed:
             SeriesShelfPlaceholder(failed: true) {
-                Task { await loadSeries() }
+                Task {
+                    seriesOutcome = nil
+                    await loadSeries()
+                }
             }
         case .single:
             EmptyView()
@@ -288,8 +291,9 @@ struct DetailView: View {
         supplement = try? await CoreClient.shared.metadata(drama: shown)
     }
 
+    /// 查本系列。页面重新出现时（切标签、关掉播放页）沿用已有结果直到新结果回来：先清空的话，
+    /// 看完的这部主按钮会从「观看下一部」闪成「重新观看」，那一下按到会从第 1 集重播。
     private func loadSeries() async {
-        seriesOutcome = nil
         seriesOutcome = await SeriesLookup.shared.outcome(of: drama)
     }
 
