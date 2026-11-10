@@ -134,7 +134,8 @@ struct CollapsedSeriesItem<Item> {
 private struct PendingSeries {
     var base: String
     var unit: String
-    var members: [(part: Int, index: Int)]
+    /// inferred：不带后缀、按剧名算作第 1 部的。
+    var members: [(part: Int, index: Int, inferred: Bool)]
 }
 
 enum SeriesGrouping {
@@ -151,7 +152,7 @@ enum SeriesGrouping {
             guard let parsed = SeriesTitle.parse(title(item)) else { continue }
             let key = source(item) + "|" + parsed.key
             groups[key, default: PendingSeries(base: parsed.base, unit: parsed.unit, members: [])]
-                .members.append((parsed.part, index))
+                .members.append((parsed.part, index, false))
         }
         // 2. 无后缀、剧名与某组一致的标题算第 1 部（优先「部」）。
         for (index, item) in items.enumerated() where SeriesTitle.parse(title(item)) == nil {
@@ -159,17 +160,20 @@ enum SeriesGrouping {
             for unit in ["部", "季"] {
                 let key = source(item) + "|" + normalized + ":" + unit
                 if groups[key] != nil {
-                    groups[key]?.members.append((1, index))
+                    groups[key]?.members.append((1, index, true))
                     break
                 }
             }
         }
-        // 3. 至少两个不同部数才算系列；同一部数重复出现时只取最早的一项，其余按单部处理。
+        // 3. 至少两个不同部数才算系列；同一部数重复出现时只取一项（写明部数的优先于按剧名推断的，再取最早的），
+        //    其余按单部处理。红果搜剧名时常把不带后缀的同名剧排在「第一季」前面。
         var membership: [Int: String] = [:]
         var series: [String: SeriesGroup<Item>] = [:]
         for (key, pending) in groups {
             var seen = Set<Int>()
-            let members = pending.members.sorted { ($0.part, $0.index) < ($1.part, $1.index) }.filter { seen.insert($0.part).inserted }
+            let members = pending.members
+                .sorted { ($0.part, $0.inferred ? 1 : 0, $0.index) < ($1.part, $1.inferred ? 1 : 0, $1.index) }
+                .filter { seen.insert($0.part).inserted }
             guard members.count >= 2 else { continue }
             members.forEach { membership[$0.index] = key }
             series[key] = SeriesGroup(

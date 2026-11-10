@@ -30,21 +30,42 @@ struct SeriesCacheTests {
     @Test func concurrentLookupsSearchOnce() async {
         let search = FakeSearch(results: [part1, part2])
         let lookup = cache(search)
-        async let first = lookup.parts(of: part1)
-        async let second = lookup.parts(of: part2)
+        async let first = lookup.outcome(of: part1)
+        async let second = lookup.outcome(of: part2)
         let (one, two) = await (first, second)
-        #expect(one?.partNumbers == [1, 2])
-        #expect(two?.partNumbers == [1, 2])
+        #expect(one.group?.partNumbers == [1, 2])
+        #expect(two.group?.partNumbers == [1, 2])
         #expect(await search.calls == 1)
     }
 
-    /// 搜索失败不记为已搜，下次再试。
-    @Test func failureIsRetried() async {
+    /// 搜索失败：报「没查成」（详情页显示重试，不当成没有其他部），也不记为已搜，下次再试。
+    @Test func failureIsReportedAndRetried() async {
         let search = FakeSearch(results: nil)
         let lookup = cache(search)
-        #expect(await lookup.parts(of: part1) == nil)
-        #expect(await lookup.parts(of: part1) == nil)
+        #expect(await lookup.outcome(of: part1) == .failed)
+        #expect(await lookup.outcome(of: part1) == .failed)
         #expect(await search.calls == 2)
+    }
+
+    /// 同时查、搜索失败：等同一次搜索的那一边也拿到「没查成」，不是「没有其他部」。
+    @Test func concurrentWaiterSeesTheFailure() async {
+        let search = FakeSearch(results: nil)
+        let lookup = cache(search)
+        async let first = lookup.outcome(of: part1)
+        async let second = lookup.outcome(of: part1)
+        let (one, two) = await (first, second)
+        #expect(one == .failed)
+        #expect(two == .failed)
+        #expect(await search.calls == 1)
+    }
+
+    /// 搜到了但没有其他部：报「单部剧」，本次运行内不再搜。
+    @Test func noOtherPartsIsSingle() async {
+        let search = FakeSearch(results: [part1])
+        let lookup = cache(search)
+        #expect(await lookup.outcome(of: part1) == .single)
+        #expect(await lookup.outcome(of: part1) == .single)
+        #expect(await search.calls == 1)
     }
 
     /// 搜索页存入的系列直接命中，不再搜索。
@@ -56,7 +77,7 @@ struct SeriesCacheTests {
             return
         }
         await lookup.remember(group)
-        #expect(await lookup.parts(of: part2)?.partNumbers == [1, 2])
+        #expect(await lookup.outcome(of: part2).group?.partNumbers == [1, 2])
         #expect(await search.calls == 0)
     }
 }
