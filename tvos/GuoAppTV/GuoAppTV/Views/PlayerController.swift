@@ -76,7 +76,7 @@ final class PlayerController: NSObject, ObservableObject {
     private var metalLayer: CAMetalLayer?
     private var currentURL: URL?
     private var hasDecryptionKey = false
-    private var lastError = ""
+    private(set) var lastError = ""
     private var activePlan: PlaybackPlan?
     private var activeDanmakuEnabled = true
     private var pendingPlay: (plan: PlaybackPlan, start: Double, danmakuEnabled: Bool, speed: Double)?
