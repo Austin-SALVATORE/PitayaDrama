@@ -72,6 +72,9 @@ jobs:
       - run: go test -race -ldflags="-X duanjuapp/native/core.buildAllSources=true" ./...
         working-directory: upstream/native
         continue-on-error: true
+      # 本仓库自带的核心补丁（tvos/CoreOverlay）的测试：补丁依赖上游核心的内部结构，上游改了这里会先报出来。
+      - run: python3 scripts/build_tvos.py --test-overlay
+        continue-on-error: true
 
   tvos:
     needs: prepare

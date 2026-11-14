@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import platform
 import plistlib
@@ -21,6 +22,9 @@ core = root / 'upstream' / 'native'
 # 核心编译时就决定了站源范围（-X buildAllSources），这里记下 xcframework 属于哪个版本，
 # 复用已编好的核心时据此拒绝把火龙果短剧（仅红果）核心装进真果鉴包（或反过来）。
 core_stamp = root / 'tvos' / 'DuanjuCore' / 'DuanjuCore.variant'
+# 本仓库自带的核心补丁：目录结构对应 upstream/native（core/…、bridge/…），编译时用 go build -overlay
+# 叠加进去，upstream/ 子模块本身不改。现有补丁见 tvos/CoreOverlay/core/tvos_stream_revive.go。
+core_overlay_sources = root / 'tvos' / 'CoreOverlay'
 
 
 def run(arguments, **kwargs):
@@ -60,6 +64,31 @@ def validate_package(package, prefix):
             raise SystemExit('tvOS 压缩包损坏：' + corrupt)
 
 
+def write_core_overlay():
+    """生成 go build / go test 用的 -overlay 文件，返回它的路径。"""
+    replace = {
+        str(core / source.relative_to(core_overlay_sources)): str(source)
+        for source in sorted(core_overlay_sources.rglob('*.go'))
+    }
+    directory = core / 'build' / 'tvos'
+    directory.mkdir(parents=True, exist_ok=True)
+    overlay = directory / 'overlay.json'
+    overlay.write_text(json.dumps({'Replace': replace}, indent=2))
+    return overlay
+
+
+def test_core_overlay():
+    """在本机跑核心补丁的 Go 测试（名字以 TestTVOS 开头）。"""
+    go = shutil.which('go')
+    if not go:
+        raise SystemExit('请安装 Go 1.24.1 或更新版本。')
+    environment = os.environ.copy()
+    environment.setdefault('GOPROXY', 'https://goproxy.cn,direct')
+    environment.setdefault('GOSUMDB', 'off')
+    run([go, 'test', '-overlay', str(write_core_overlay()), './core', '-run', 'TestTVOS', '-count=1'],
+        cwd=core, env=environment)
+
+
 def build_core(simulator=False, variant=BuildVariant()):
     if platform.system() != 'Darwin':
         raise SystemExit('tvOS 构建需要 macOS 和完整 Xcode。')
@@ -97,8 +126,8 @@ def build_core(simulator=False, variant=BuildVariant()):
             'GOOS': 'ios', 'GOARCH': architecture, 'CC': compiler,
             'CGO_CFLAGS': flags, 'CGO_LDFLAGS': flags,
         }
-        run([go, 'build', '-trimpath', '-buildmode=c-archive', '-ldflags=' + variant.linker_flags,
-             '-o', str(output), './bridge'], cwd=core, env=build_env)
+        run([go, 'build', '-trimpath', '-buildmode=c-archive', '-overlay', str(write_core_overlay()),
+             '-ldflags=' + variant.linker_flags, '-o', str(output), './bridge'], cwd=core, env=build_env)
         shutil.copy2(output.with_suffix('.h'), headers / 'DuanjuCore.h')
         libraries.append((sdk, output, headers))
     arguments = ['xcodebuild', '-create-xcframework']
@@ -176,8 +205,13 @@ def main():
     parser.add_argument('--core-only', action='store_true')
     parser.add_argument('--simulator', action='store_true', help='额外生成模拟器核心；不启动模拟器')
     parser.add_argument('--export-options', type=Path, help='使用自己的 Xcode 签名配置导出 IPA')
+    parser.add_argument('--test-overlay', action='store_true',
+                        help='只在本机跑 tvos/CoreOverlay 里核心补丁的 Go 测试，不构建')
     add_variant_argument(parser)
     options = parser.parse_args()
+    if options.test_overlay:
+        test_core_overlay()
+        return
     variant = BuildVariant(options.all_sources)
     build_core(options.simulator, variant)
     if options.core_only:
