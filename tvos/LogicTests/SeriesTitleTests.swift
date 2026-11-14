@@ -90,6 +90,30 @@ struct SeriesTitleTests {
         #expect(entries.contains(.single(Item(title: "万妖图录传"))))
     }
 
+    /// 部数相同、没排进系列的同名剧记在 alternates 里（搜索页仍把它们单独列出），详情页靠它找回本系列。
+    @Test func sameNumberedLosersAreAlternates() {
+        let entries = group([
+            Item(title: "五灵根修仙：我有一个吞噬空间"),
+            Item(title: "五灵根修仙：我有一个吞噬空间！"),
+            Item(title: "五灵根修仙：我有一个吞噬空间！第1季"),
+            Item(title: "五灵根修仙：我有一个吞噬空间！第二季"),
+            Item(title: "五灵根修仙：我有一个吞噬空间第2季"),
+        ])
+        guard case .series(let series) = entries.first(where: { if case .series = $0 { true } else { false } }) else {
+            Issue.record("expected a series")
+            return
+        }
+        #expect(series.parts.map(\.item.title) == ["五灵根修仙：我有一个吞噬空间！第1季", "五灵根修仙：我有一个吞噬空间！第二季"])
+        #expect(series.alternates.map(\.part) == [1, 1, 2])
+        #expect(series.alternates.map(\.item.title) == [
+            "五灵根修仙：我有一个吞噬空间", "五灵根修仙：我有一个吞噬空间！", "五灵根修仙：我有一个吞噬空间第2季",
+        ])
+        #expect(entries.count == 4)
+        let swapped = series.substituting(series.alternates[0])
+        #expect(swapped.parts.map(\.item.title) == ["五灵根修仙：我有一个吞噬空间", "五灵根修仙：我有一个吞噬空间！第二季"])
+        #expect(swapped.partNumbers == [1, 2])
+    }
+
     @Test func unitsDontMix() {
         let entries = group([Item(title: "霸总 第二部"), Item(title: "霸总 第二季")])
         #expect(entries == [.single(Item(title: "霸总 第二部")), .single(Item(title: "霸总 第二季"))])

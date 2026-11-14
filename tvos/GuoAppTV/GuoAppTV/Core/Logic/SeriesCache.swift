@@ -30,9 +30,14 @@ actor SeriesCache<Item: Sendable> {
         self.source = source
     }
 
+    /// 系列里每一部都记下本系列；部数相同、没排进系列的同名剧（group.alternates）也记，
+    /// 它看到的本系列由它自己顶替同部数的那一部——否则从它进详情，查完就什么都不显示。
     func remember(_ group: SeriesGroup<Item>) {
         for part in group.parts {
             groupsByID[id(part.item)] = group
+        }
+        for alternate in group.alternates {
+            groupsByID[id(alternate.item)] = group.substituting(alternate)
         }
     }
 

@@ -68,6 +68,32 @@ struct SeriesCacheTests {
         #expect(await search.calls == 1)
     }
 
+    /// 实测搜「五灵根修仙：我有一个吞噬空间」：两部不带后缀的同名剧排在「…第1季」前面。第 1 季归写明的那部，
+    /// 但从不带后缀的那部进详情也要有本系列（它自己顶第 1 季），不能查完就什么都不显示。
+    @Test func bareTitleBesideExplicitFirstPartStillFindsItsSeries() async {
+        let bare = Show(id: "bare", title: "五灵根修仙：我有一个吞噬空间")
+        let bareBang = Show(id: "bang", title: "五灵根修仙：我有一个吞噬空间！")
+        let first = Show(id: "s1", title: "五灵根修仙：我有一个吞噬空间！第1季")
+        let second = Show(id: "s2", title: "五灵根修仙：我有一个吞噬空间！第二季")
+        let third = Show(id: "s3", title: "五灵根修仙：我有一个吞噬空间（第三季）")
+        let search = FakeSearch(results: [bare, bareBang, first, second, third])
+        let lookup = cache(search)
+        #expect(await lookup.outcome(of: bare).group?.parts.map(\.item.id) == ["bare", "s2", "s3"])
+        #expect(await lookup.outcome(of: bareBang).group?.parts.map(\.item.id) == ["bang", "s2", "s3"])
+        #expect(await lookup.outcome(of: first).group?.parts.map(\.item.id) == ["s1", "s2", "s3"])
+        #expect(await lookup.outcome(of: second).group?.parts.map(\.item.id) == ["s1", "s2", "s3"])
+        #expect(await search.calls == 1)
+    }
+
+    /// 同一季有两个上传（都写明第二季）：排不进系列的那一部进详情也要有本系列。
+    @Test func duplicateExplicitPartStillFindsItsSeries() async {
+        let other = Show(id: "b2", title: "霸总第2部")
+        let search = FakeSearch(results: [part1, part2, other])
+        let lookup = cache(search)
+        #expect(await lookup.outcome(of: other).group?.parts.map(\.item.id) == ["a", "b2"])
+        #expect(await lookup.outcome(of: part2).group?.parts.map(\.item.id) == ["a", "b"])
+    }
+
     /// 搜索页存入的系列直接命中，不再搜索。
     @Test func rememberedGroupSkipsSearch() async {
         let search = FakeSearch(results: [])
