@@ -1,6 +1,9 @@
 name: Build tvOS packages
 
-# 独立仓只构建 tvOS：手动触发，构建两个版本并发布 Release。
+# 独立仓只构建 tvOS：手动触发，构建火龙果短剧并发布 Release。
+# 核心不带站源代码，站源是构建时内置的 JS 模块：scripts/build_tvos.py 按 tvos/modules.lock.json
+# 下载并校验 sha256 后编进核心（模块文件不进本仓库）；真果鉴（--all-sources）暂不构建，
+# 模块核心目前只内置红果。
 # 版本号唯一来源是根目录 VERSION：构建脚本（scripts/build_tvos.py）会把
 # MARKETING_VERSION 覆盖为 VERSION 再编译，关于页显示的即 VERSION；
 # 工程文件里的 MARKETING_VERSION 仅供直接用 Xcode 打开构建时兜底，
@@ -69,10 +72,7 @@ jobs:
       - run: go test -race ./...
         working-directory: upstream/native
         continue-on-error: true
-      - run: go test -race -ldflags="-X duanjuapp/native/core.buildAllSources=true" ./...
-        working-directory: upstream/native
-        continue-on-error: true
-      # 本仓库自带的核心补丁（tvos/CoreOverlay）的测试：补丁依赖上游核心的内部结构，上游改了这里会先报出来。
+      # 本仓库自带的核心补丁（fork/）的测试：补丁依赖上游核心的内部结构，上游改了这里会先报出来。
       - run: python3 scripts/build_tvos.py --test-overlay
         continue-on-error: true
 
@@ -86,8 +86,6 @@ jobs:
         include:
           - edition: hongguojian
             arguments: ''
-          - edition: zhenguojian
-            arguments: '--all-sources'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -138,10 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<EOF
-          Apple TV（tvOS 16+）原生应用，两个版本功能相同，区别只在站源范围，按需选择：
-
-          - 火龙果短剧 hongguojian：仅红果站源
-          - 真果鉴 zhenguojian：全部站源
+          Apple TV（tvOS 16+）原生应用：火龙果短剧 hongguojian，红果站源。
 
           tvOS：
           - *-tvos-unsigned.ipa：未签名 IPA，需在 Mac 上用 Xcode 签名后安装到 Apple TV

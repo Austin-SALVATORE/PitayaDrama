@@ -40,10 +40,7 @@
 
 **未移植**：下载、局域网互联。
 
-两个版本功能相同，区别只在站源范围：
-
-- 火龙果短剧（hongguojian）：仅红果站源
-- 真果鉴（zhenguojian）：全部站源
+目前只构建火龙果短剧（hongguojian，红果站源）。真果鉴（全部站源）暂停：核心改为站源模块后只内置了红果模块。
 
 ## 与上游共享的部分
 
@@ -52,10 +49,14 @@
   `git submodule status` 为准（`CHANGELOG.md` 每次同步都会记一笔）。本仓与上游共享
   Go 核心与 `DuanjuRequest` JSON 协议。
 - **播放协议**：播放地址、解密密钥等由 Go 核心通过 JSON 协议提供。
-- **本地核心改动**：`fork/` 是本仓对上游核心的覆盖层（出品方功能：解析
-  列表/搜索载荷的 `copyright`、新增 `producerWorks` 动作等），构建时由
-  `scripts/build_tvos.py` 先跑 `scripts/apply_fork_overlay.py` 合入
-  submodule 工作区；补丁打不上构建直接失败，需人工重排到新版上游。
+- **站源模块**：上游核心不含站源代码，站源是核心运行的 JS 模块。红果模块来自
+  [guoapp-modules/hongguo](https://github.com/guoapp-modules/hongguo)，版本与文件的 sha256 记在
+  `tvos/modules.lock.json`；`scripts/build_tvos.py` 构建时下载（缓存在 `build/modules/`，之后可离线重编）、
+  校验后放进 `upstream/native/core/bundled/`，由核心 `go:embed` 编进去。模块文件不提交进本仓库。
+- **本地核心改动**：`fork/` 是本仓对上游核心的改动（App 挂起后恢复本机播放服务：`fork/core`、
+  `fork/bridge` 里的新增文件，以及给 `app_stream.go` 加健康端点的 `fork/patches/app_stream.go.patch`）。
+  构建时用 `go build -overlay` 叠加：补丁打在原文件的副本上（`upstream/native/build/tvos/patched/`），
+  打不上构建直接失败，需按新版核心重做补丁。`python3 scripts/build_tvos.py --test-overlay` 在本机跑它们的 Go 测试。
   不要直接改 `upstream/` 里的文件。
 
 ### 同步上游核心
@@ -104,12 +105,12 @@ Caches。**系统在存储不足时可能清理 Caches**，追剧与进度可能
 ```sh
 git clone --recurse-submodules https://github.com/lukaschan/guoapp-tvos.git
 # 已克隆过的仓库：git submodule update --init --recursive
-python3 scripts/build_tvos.py [--all-sources]
+python3 scripts/build_tvos.py
 ```
 
-- 默认构建火龙果短剧；`--all-sources` 构建真果鉴。
+- 构建火龙果短剧；需要 Go 1.26 或更新版本。`--all-sources`（真果鉴）暂不可用，会直接报错退出。
 - 产物在 `dist/tvos/`，为**未签名** IPA，需在 Mac 上用 Xcode 签名后安装到 Apple TV。
-- CI（GitHub Actions，手动触发）构建两个版本并发布 Release，tag 形如 `tvos-v2.41`。
+- CI（GitHub Actions，手动触发）构建并发布 Release，tag 形如 `tvos-v1.1.0`。
 
 版本号：根目录 `VERSION`（如 `2.41`）是唯一来源：构建脚本把 Xcode 工程的
 `MARKETING_VERSION` 覆盖为它，并用它命名 IPA；同步工作流升版本时会一并改工程里的值。
@@ -127,14 +128,14 @@ Simulators 里配对）。然后：
 ```sh
 python3 scripts/deploy_tvos.py --team <Team ID> --bundle-id <自己的唯一包名> --device <Apple TV 名称> --save
 # 之后（包括免费账号描述文件 7 天过期后续签）只需：
-python3 scripts/deploy_tvos.py [--all-sources]
+python3 scripts/deploy_tvos.py
 ```
 
 - 脚本编译 Go 核心 → Xcode 自动签名构建 → `devicectl` 安装并启动。
 - 工程默认包名 `com.duanju.guoapp.tv` 已被其他开发者注册，必须用自己的唯一包名；
   `--save` 把参数存到 `tvos-deploy.local.json`（已 gitignore），也可用环境变量
   `GUOAPP_TEAM_ID` / `GUOAPP_BUNDLE_ID` / `GUOAPP_TV_DEVICE`。
-- 真果鉴（`--all-sources`）包名自动加 `.all`，两个版本可同时安装。
+- 真果鉴（`--all-sources`，暂不可用）包名自动加 `.all`，两个版本可同时安装。
 
 ## 目录结构
 
@@ -142,9 +143,11 @@ python3 scripts/deploy_tvos.py [--all-sources]
 | --- | --- |
 | `tvos/` | Apple TV 原生应用（SwiftUI + Go 核心 + MPVKit） |
 | `upstream/` | 上游仓库 git submodule，Go 核心在 `upstream/native/`（见上文「与上游共享的部分」） |
+| `fork/` | 本仓对核心的改动，构建时经 `go build -overlay` 叠加 |
+| `tvos/modules.lock.json` | 构建时内置的站源模块（仓库、标签、sha256） |
 | `scripts/build_tvos.py` | 构建脚本：先编 Go 核心为 xcframework，再用 xcodebuild 出包 |
 | `scripts/deploy_tvos.py` | 签名构建并安装、启动到已配对的 Apple TV |
-| `.github/workflows/build.yml` | CI：构建两个版本并发布 Release |
+| `.github/workflows/build.yml` | CI：构建并发布 Release |
 | `VERSION` | 版本号 |
 | `CHANGELOG.md` | 更新日志 |
 
