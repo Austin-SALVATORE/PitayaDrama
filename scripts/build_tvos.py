@@ -298,6 +298,14 @@ def core_revision():
     return result.stdout.strip() if result.returncode == 0 else ''
 
 
+def bundled_modules_stamp():
+    # 内置了哪些模块、哪个版本：「标识@标签:manifest sha 前 16 位:main.js sha 前 16 位」，逗号分隔。
+    # 写进 Info.plist 的 GUOAppBundledModules；应用启动时它和上次的不同，就让核心从内置副本重装这些模块
+    # （见 tvos/GuoAppTV/GuoAppTV/Core/Logic/BundledModuleRefresh.swift）。
+    return ','.join(f'{module["id"]}@{module["tag"]}:{module["sha256"]["manifest.json"][:16]}:'
+                    f'{module["sha256"]["main.js"][:16]}' for module in read_module_lock())
+
+
 def xcode_settings(variant, version):
     # 关于页显示的版本以根目录 VERSION 为准：构建时覆盖工程里的 MARKETING_VERSION；
     # 显示名按版本区分（火龙果短剧 / 真果鉴），作为构建设置在签名前写进 Info.plist；
@@ -306,6 +314,7 @@ def xcode_settings(variant, version):
         f'MARKETING_VERSION={version}',
         f'GUOAPP_DISPLAY_NAME={variant.display_name}',
         f'GUOAPP_CORE_REVISION={core_revision()}',
+        f'GUOAPP_BUNDLED_MODULES={bundled_modules_stamp()}',
     ]
 
 

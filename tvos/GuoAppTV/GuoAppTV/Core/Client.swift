@@ -141,6 +141,15 @@ actor CoreClient {
         ).first ?? FileManager.default.temporaryDirectory
         let cache = directory.appendingPathComponent("core-cache", isDirectory: true)
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let stamp = Bundle.main.object(forInfoDictionaryKey: BundledModuleRefresh.infoKey) as? String ?? ""
+        do {
+            let removed = try BundledModuleRefresh.apply(stamp: stamp, dataDirectory: directory)
+            if !removed.isEmpty {
+                DiagnosticLog.record("bundled modules changed (\(stamp)), reinstalling: \(removed.joined(separator: ", "))")
+            }
+        } catch {
+            DiagnosticLog.record("bundled module refresh failed: \(error.localizedDescription)")
+        }
         let data = try await call(["action": "initialize", "directory": directory.path, "cache": cache.path])
         sources = SourceSite.list(fromCore: data["sources"] as? [Any] ?? [])
         initialized = true
