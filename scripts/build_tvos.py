@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -8,10 +9,12 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 import zipfile
 from pathlib import Path
 
-from app_build import BuildVariant, add_variant_argument
+from app_build import BuildVariant, add_variant_argument, variant_from
 
 root = Path(__file__).resolve().parents[1]
 project = root / 'tvos' / 'GuoAppTV' / 'GuoAppTV.xcodeproj'
@@ -19,12 +22,18 @@ app_name = 'GuoAppTV'
 # Go 核心在上游仓库的 native/ 目录；上游整仓以 git submodule 形式
 # 放在 upstream/（见 .gitmodules），核心路径即 upstream/native。
 core = root / 'upstream' / 'native'
-# 核心编译时就决定了站源范围（-X buildAllSources），这里记下 xcframework 属于哪个版本，
-# 复用已编好的核心时据此拒绝把火龙果短剧（仅红果）核心装进真果鉴包（或反过来）。
+# 记下 xcframework 是为哪个版本编的，复用已编好的核心时据此拒绝装错版本。
 core_stamp = root / 'tvos' / 'DuanjuCore' / 'DuanjuCore.variant'
-# 本仓库自带的核心补丁：目录结构对应 upstream/native（core/…、bridge/…），编译时用 go build -overlay
-# 叠加进去，upstream/ 子模块本身不改。现有补丁见 tvos/CoreOverlay/core/tvos_stream_revive.go。
-core_overlay_sources = root / 'tvos' / 'CoreOverlay'
+# 本仓库对核心的改动：fork/core、fork/bridge 里是新增的 Go 文件，fork/patches 里是对核心原有文件的补丁
+# （文件名即 native/core 下的目标文件）。编译时用 go build -overlay 叠加：新增文件直接映射，
+# 打过补丁的副本生成在 upstream/native/build/tvos/patched 里替换原文件，upstream/ 子模块本身不改。
+fork = root / 'fork'
+# 内置站源模块：仓库与版本、文件的 sha256 记在 tvos/modules.lock.json。构建时下载到 build/modules
+# （模块仓库没有许可证，模块文件不进本仓库），校验后放进核心的 native/core/bundled/<标识>/，由 go:embed 编进核心。
+modules_lock = root / 'tvos' / 'modules.lock.json'
+modules_cache = root / 'build' / 'modules'
+bundled_modules = core / 'core' / 'bundled'
+module_files = ('manifest.json', 'main.js')
 
 
 def run(arguments, **kwargs):
@@ -64,12 +73,50 @@ def validate_package(package, prefix):
             raise SystemExit('tvOS 压缩包损坏：' + corrupt)
 
 
+def require_core_checkout():
+    if not (core / 'core').is_dir():
+        raise SystemExit('upstream/ 子模块还没有检出，请先运行 git submodule update --init --recursive。')
+
+
+def patched_core_files():
+    """把 fork/patches 里的补丁打在核心原文件的副本上，返回 {原文件: 打过补丁的副本}。"""
+    output = core / 'build' / 'tvos' / 'patched'
+    if output.exists():
+        shutil.rmtree(output)
+    replaced = {}
+    for patch in sorted((fork / 'patches').glob('*.patch')):
+        relative = Path('core') / patch.name.removesuffix('.patch')
+        original = core / relative
+        if not original.is_file():
+            raise SystemExit(f'补丁 {patch.name} 的目标 upstream/native/{relative} 不存在，请按当前核心重做这个补丁。')
+        # 补丁路径相对上游仓库根目录（native/core/…）：在系统临时目录里摆出同样的结构再打，
+        # GIT_CEILING_DIRECTORIES 让 git 不把它当成某个仓库的一部分。
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory).resolve()
+            target = work / 'native' / relative
+            target.parent.mkdir(parents=True)
+            shutil.copy2(original, target)
+            result = subprocess.run(['git', 'apply', str(patch)], cwd=work, capture_output=True, text=True,
+                                    env=os.environ | {'GIT_CEILING_DIRECTORIES': str(work.parent)})
+            if result.returncode != 0:
+                raise SystemExit(f'补丁打不上：{patch.name}，核心改了同一处代码，请按当前核心重做这个补丁'
+                                 f'（不要跳过）：\n{result.stderr}')
+            copy = output / relative
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, copy)
+        replaced[str(original)] = str(copy)
+    return replaced
+
+
 def write_core_overlay():
     """生成 go build / go test 用的 -overlay 文件，返回它的路径。"""
+    require_core_checkout()
     replace = {
-        str(core / source.relative_to(core_overlay_sources)): str(source)
-        for source in sorted(core_overlay_sources.rglob('*.go'))
+        str(core / part / source.name): str(source)
+        for part in ('core', 'bridge')
+        for source in sorted((fork / part).glob('*.go'))
     }
+    replace |= patched_core_files()
     directory = core / 'build' / 'tvos'
     directory.mkdir(parents=True, exist_ok=True)
     overlay = directory / 'overlay.json'
@@ -77,29 +124,104 @@ def write_core_overlay():
     return overlay
 
 
-def test_core_overlay():
-    """在本机跑核心补丁的 Go 测试（名字以 TestTVOS 开头）。"""
+def read_module_lock():
+    try:
+        modules = json.loads(modules_lock.read_text())['modules']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f'读不了 {modules_lock.name}：{error!r}')
+    if not isinstance(modules, list) or not modules:
+        raise SystemExit(f'{modules_lock.name} 里没有站源模块，核心不能不带站源。')
+    for module in modules:
+        valid = (isinstance(module, dict)
+                 and all(isinstance(module.get(key), str) and module[key] for key in ('id', 'repo', 'tag'))
+                 and re.fullmatch(r'[a-z0-9_-]{1,32}', module['id'])
+                 and isinstance(module.get('sha256'), dict) and sorted(module['sha256']) == sorted(module_files)
+                 and all(re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in module['sha256'].values()))
+        if not valid:
+            raise SystemExit(f'{modules_lock.name} 的条目无效：{module!r}'
+                             f'（要有 id、repo、tag，以及 {"、".join(module_files)} 的 sha256）')
+    return modules
+
+
+def sha256_of(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def module_file(module, name):
+    """返回校验过的模块文件：缓存里有且 sha256 对得上就直接用（可离线重编），否则从模块仓库的标签下载。"""
+    expected = module['sha256'][name]
+    cached = modules_cache / module['id'] / module['tag'] / name
+    if cached.is_file() and sha256_of(cached.read_bytes()) == expected:
+        return cached
+    address = f'https://raw.githubusercontent.com/{module["repo"]}/{module["tag"]}/{name}'
+    try:
+        with urllib.request.urlopen(address, timeout=60) as response:
+            data = response.read()
+    except OSError as error:
+        raise SystemExit(f'下载站源模块文件失败：{address}（{error}）。联网后重试；下载成功过的文件缓存在 '
+                         f'{modules_cache.relative_to(root)}，之后不联网也能构建。')
+    actual = sha256_of(data)
+    if actual != expected:
+        raise SystemExit(f'{address} 的 sha256 是 {actual}，与 {modules_lock.name} 记的 {expected} 不符，'
+                         '拒绝使用。确认模块新版本后再改锁文件。')
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    partial = cached.with_name(cached.name + '.partial')
+    partial.write_bytes(data)
+    partial.replace(cached)
+    return cached
+
+
+def bundle_modules():
+    """按锁文件重建 upstream/native/core/bundled（除 .gitkeep 外先清空），核心编译时把它们编进去。"""
+    require_core_checkout()
+    modules = read_module_lock()
+    bundled_modules.mkdir(exist_ok=True)
+    for entry in bundled_modules.iterdir():
+        if entry.name == '.gitkeep':
+            continue
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    for module in modules:
+        target = bundled_modules / module['id']
+        target.mkdir()
+        for name in module_files:
+            shutil.copyfile(module_file(module, name), target / name)
+        try:
+            manifest = json.loads((target / 'manifest.json').read_text())
+        except ValueError as error:
+            raise SystemExit(f'站源模块 {module["id"]} 的 manifest.json 无效：{error}')
+        if not isinstance(manifest, dict) or manifest.get('id') != module['id']:
+            raise SystemExit(f'站源模块 {module["id"]} 的 manifest.json 里 id 不是 {module["id"]}，核心不会加载它。')
+        print(f'内置站源模块：{module["id"]} {manifest.get("version", "")}（{module["repo"]}@{module["tag"]}）')
+    if not any(entry.is_dir() for entry in bundled_modules.iterdir()):
+        raise SystemExit('upstream/native/core/bundled 里没有站源模块，编出来的核心没有任何站源，停止构建。')
+
+
+def go_environment():
     go = shutil.which('go')
     if not go:
-        raise SystemExit('请安装 Go 1.24.1 或更新版本。')
+        raise SystemExit('请安装 Go 1.26 或更新版本。')
     environment = os.environ.copy()
     environment.setdefault('GOPROXY', 'https://goproxy.cn,direct')
     environment.setdefault('GOSUMDB', 'off')
+    return go, environment
+
+
+def test_core_overlay():
+    """在本机跑核心补丁的 Go 测试（名字以 TestTVOS 开头）。"""
+    go, environment = go_environment()
     run([go, 'test', '-overlay', str(write_core_overlay()), './core', '-run', 'TestTVOS', '-count=1'],
         cwd=core, env=environment)
 
 
 def build_core(simulator=False, variant=BuildVariant()):
-    # 先合入 fork 对上游核心的本地改动（出品方功能），补丁打不上直接失败。
-    run([sys.executable, str(root / 'scripts' / 'apply_fork_overlay.py')])
     if platform.system() != 'Darwin':
         raise SystemExit('tvOS 构建需要 macOS 和完整 Xcode。')
-    go = shutil.which('go')
-    if not go:
-        raise SystemExit('请安装 Go 1.24.1 或更新版本。')
-    environment = os.environ.copy()
-    environment.setdefault('GOPROXY', 'https://goproxy.cn,direct')
-    environment.setdefault('GOSUMDB', 'off')
+    go, environment = go_environment()
+    bundle_modules()
+    overlay = write_core_overlay()
     environment['CGO_ENABLED'] = '1'
     environment['GOTOOLCHAIN'] = os.environ.get('GOTOOLCHAIN', 'auto')
     # Go 没有 tvos GOOS：用 GOOS=ios + tvOS SDK 编译是 Go 维护者确认的
@@ -128,7 +250,7 @@ def build_core(simulator=False, variant=BuildVariant()):
             'GOOS': 'ios', 'GOARCH': architecture, 'CC': compiler,
             'CGO_CFLAGS': flags, 'CGO_LDFLAGS': flags,
         }
-        run([go, 'build', '-trimpath', '-buildmode=c-archive', '-overlay', str(write_core_overlay()),
+        run([go, 'build', '-trimpath', '-buildmode=c-archive', '-overlay', str(overlay),
              '-ldflags=' + variant.linker_flags, '-o', str(output), './bridge'], cwd=core, env=build_env)
         shutil.copy2(output.with_suffix('.h'), headers / 'DuanjuCore.h')
         libraries.append((sdk, output, headers))
@@ -208,13 +330,13 @@ def main():
     parser.add_argument('--simulator', action='store_true', help='额外生成模拟器核心；不启动模拟器')
     parser.add_argument('--export-options', type=Path, help='使用自己的 Xcode 签名配置导出 IPA')
     parser.add_argument('--test-overlay', action='store_true',
-                        help='只在本机跑 tvos/CoreOverlay 里核心补丁的 Go 测试，不构建')
+                        help='只在本机跑 fork/ 里核心补丁的 Go 测试，不构建')
     add_variant_argument(parser)
     options = parser.parse_args()
     if options.test_overlay:
         test_core_overlay()
         return
-    variant = BuildVariant(options.all_sources)
+    variant = variant_from(options)
     build_core(options.simulator, variant)
     if options.core_only:
         return

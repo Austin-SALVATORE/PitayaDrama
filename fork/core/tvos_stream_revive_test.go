@@ -19,7 +19,7 @@ func tvosReviveFixture(t *testing.T) (*nativeEngine, *nativeStreamServer, string
 		io.WriteString(w, "binary-media")
 	}))
 	t.Cleanup(upstream.Close)
-	engine, err := newNativeEngine(t.TempDir(), "")
+	engine, err := newNativeEngine(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func tvosReviveFixture(t *testing.T) (*nativeEngine, *nativeStreamServer, string
 			current.server.Close()
 		}
 	})
-	address, _ := stream.nativeOpen(providerMedia{URL: upstream.URL + "/video.mp4"})
+	address, _ := stream.nativeOpen(ProviderMedia{URL: upstream.URL + "/video.mp4"})
 	return engine, stream, address
 }
 
@@ -71,7 +71,7 @@ func TestTVOSReviveStreamIsIdleBeforeAnyPlayback(t *testing.T) {
 	if got := ReviveNativeStream(); got != "idle" {
 		t.Fatalf("no engine: got %q, want idle", got)
 	}
-	engine, err := newNativeEngine(t.TempDir(), "")
+	engine, err := newNativeEngine(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

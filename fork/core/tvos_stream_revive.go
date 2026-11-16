@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// 出自 PitayaDrama（Austin-SALVATORE）的挂起恢复补丁，2026-11-15 合入本仓：
-// scripts/apply_fork_overlay.py 构建时把本文件拷进 native/core，upstream/ 子模块本身不改。
+// 本仓库自带的挂起恢复补丁，不在上游核心里：scripts/build_tvos.py 用 go build -overlay 把本文件编进
+// native/core（健康端点来自 fork/patches/app_stream.go.patch），upstream/ 子模块本身不改。
 //
 // 问题：tvOS 在 App 挂起时（切到后台几分钟、电视休眠）会回收监听中的套接字。核心的本机播放服务
 // （newNativeStreamServer，127.0.0.1 随机端口）只创建一次，被回收后所有播放地址都连不上

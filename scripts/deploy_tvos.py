@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from app_build import BuildVariant, add_variant_argument
+from app_build import BuildVariant, add_variant_argument, variant_from
 from build_tvos import (app_name, build_core, project, read_version, require_core, resolve_packages, root, run,
                         verify_display_name, xcode_settings)
 
@@ -129,11 +129,11 @@ def main() -> None:
     parser.add_argument('--save', action='store_true', help=f'把本次参数写入 {local_config.name}')
     add_variant_argument(parser)
     options = parser.parse_args()
+    variant = variant_from(options)
     settings = load_settings(options)
     if options.save:
         local_config.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2) + '\n')
         print('已保存部署参数到 ' + str(local_config))
-    variant = BuildVariant(options.all_sources)
     bundle_id = settings.bundle_id + ('.all' if variant.all_sources else '')
 
     print(f'==> 查找 Apple TV「{settings.device}」')
