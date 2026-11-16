@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -34,6 +35,14 @@ modules_lock = root / 'tvos' / 'modules.lock.json'
 modules_cache = root / 'build' / 'modules'
 bundled_modules = core / 'core' / 'bundled'
 module_files = ('manifest.json', 'main.js')
+# 锁文件里的值会拼进路径和下载地址，先按这些规则校验（模块标识与核心的 moduleIDPattern 一致）。
+lock_patterns = {
+    'id': r'[a-z0-9][a-z0-9_-]{0,31}',
+    'repo': r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}',
+    'tag': r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}',
+}
+# 编出的核心里必须有本仓补丁（fork/），否则说明 -overlay 没生效。
+core_overlay_markers = {'symbol': '_DuanjuReviveStream', 'string': b'/__guoapp_health'}
 
 
 def run(arguments, **kwargs):
@@ -133,13 +142,18 @@ def read_module_lock():
         raise SystemExit(f'{modules_lock.name} 里没有站源模块，核心不能不带站源。')
     for module in modules:
         valid = (isinstance(module, dict)
-                 and all(isinstance(module.get(key), str) and module[key] for key in ('id', 'repo', 'tag'))
-                 and re.fullmatch(r'[a-z0-9_-]{1,32}', module['id'])
+                 and all(isinstance(module.get(key), str) and re.fullmatch(pattern, module[key])
+                         for key, pattern in lock_patterns.items())
+                 and '..' not in module['repo'] + module['tag']
                  and isinstance(module.get('sha256'), dict) and sorted(module['sha256']) == sorted(module_files)
-                 and all(re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in module['sha256'].values()))
+                 and all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+                         for value in module['sha256'].values()))
         if not valid:
             raise SystemExit(f'{modules_lock.name} 的条目无效：{module!r}'
-                             f'（要有 id、repo、tag，以及 {"、".join(module_files)} 的 sha256）')
+                             f'（要有 id、repo（owner/name）、tag，以及 {"、".join(module_files)} 的 sha256）')
+    ids = [module['id'] for module in modules]
+    if len(set(ids)) != len(ids):
+        raise SystemExit(f'{modules_lock.name} 里有重复的模块标识：{ids}')
     return modules
 
 
@@ -157,9 +171,9 @@ def module_file(module, name):
     try:
         with urllib.request.urlopen(address, timeout=60) as response:
             data = response.read()
-    except OSError as error:
+    except (OSError, http.client.HTTPException, ValueError) as error:
         raise SystemExit(f'下载站源模块文件失败：{address}（{error}）。联网后重试；下载成功过的文件缓存在 '
-                         f'{modules_cache.relative_to(root)}，之后不联网也能构建。')
+                         f'{os.path.relpath(modules_cache, root)}，之后不联网也能构建。')
     actual = sha256_of(data)
     if actual != expected:
         raise SystemExit(f'{address} 的 sha256 是 {actual}，与 {modules_lock.name} 记的 {expected} 不符，'
@@ -252,6 +266,7 @@ def build_core(simulator=False, variant=BuildVariant()):
         }
         run([go, 'build', '-trimpath', '-buildmode=c-archive', '-overlay', str(overlay),
              '-ldflags=' + variant.linker_flags, '-o', str(output), './bridge'], cwd=core, env=build_env)
+        verify_core_archive(output)
         shutil.copy2(output.with_suffix('.h'), headers / 'DuanjuCore.h')
         libraries.append((sdk, output, headers))
     arguments = ['xcodebuild', '-create-xcframework']
@@ -271,13 +286,49 @@ def build_core(simulator=False, variant=BuildVariant()):
     # 与 GuoAppTV-Bridging-Header.h 同目录，clang 按引号包含规则找到它。
     header = root / 'tvos' / 'GuoAppTV' / 'GuoAppTV' / 'DuanjuCore.h'
     shutil.copy2(device[2] / 'DuanjuCore.h', header)
-    core_stamp.write_text(variant.slug + '\n')
+    core_stamp.write_text(json.dumps({'variant': variant.slug, 'inputs': core_inputs_fingerprint()}) + '\n')
+
+
+def missing_overlay_markers(archive_bytes, symbols):
+    """编出的核心缺了哪些本仓补丁的标记（空列表即都在）。"""
+    missing = []
+    if core_overlay_markers['symbol'] not in symbols.split():
+        missing.append(core_overlay_markers['symbol'])
+    if core_overlay_markers['string'] not in archive_bytes:
+        missing.append(core_overlay_markers['string'].decode())
+    return missing
+
+
+def verify_core_archive(archive):
+    symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(archive)], text=True, stderr=subprocess.DEVNULL)
+    missing = missing_overlay_markers(archive.read_bytes(), symbols)
+    if missing:
+        raise SystemExit(f'编出的核心 {archive.name} 里没有本仓补丁（缺 {"、".join(missing)}），'
+                         'go build -overlay 没生效，停止构建。')
+
+
+def core_inputs_fingerprint():
+    """核心的输入：upstream 提交（及受版本管理文件的改动）、模块锁文件、fork/ 下全部文件。任何一项变了都要重编。"""
+    upstream = root / 'upstream'
+    digest = hashlib.sha256()
+    for arguments in (['rev-parse', 'HEAD'], ['status', '--porcelain', '--untracked-files=no']):
+        result = subprocess.run(['git', '-C', str(upstream), *arguments], capture_output=True, text=True, check=False)
+        digest.update(result.stdout.encode() + b'\0')
+    digest.update(modules_lock.read_bytes() if modules_lock.is_file() else b'')
+    for path in sorted(path for path in fork.rglob('*') if path.is_file()):
+        digest.update(b'\0' + path.relative_to(fork).as_posix().encode() + b'\0' + path.read_bytes())
+    return digest.hexdigest()
 
 
 def require_core(variant):
-    built = core_stamp.read_text().strip() if core_stamp.is_file() else ''
-    if built != variant.slug:
-        raise SystemExit(f'现有 Go 核心是 {built or "未知"} 版本，与要构建的 {variant.slug} 不符；'
+    try:
+        built = json.loads(core_stamp.read_text())
+    except (OSError, ValueError):
+        built = {}
+    if not isinstance(built, dict) or built.get('variant') != variant.slug:
+        raise SystemExit(f'现有 Go 核心不是 {variant.slug} 版本（或还没编过）；请去掉 --skip-core 重新编译核心。')
+    if built.get('inputs') != core_inputs_fingerprint():
+        raise SystemExit('现有 Go 核心不是用当前的 upstream 提交、tvos/modules.lock.json 和 fork/ 编的；'
                          '请去掉 --skip-core 重新编译核心。')
 
 

@@ -56,7 +56,9 @@
 - **本地核心改动**：`fork/` 是本仓对上游核心的改动（App 挂起后恢复本机播放服务：`fork/core`、
   `fork/bridge` 里的新增文件，以及给 `app_stream.go` 加健康端点的 `fork/patches/app_stream.go.patch`）。
   构建时用 `go build -overlay` 叠加：补丁打在原文件的副本上（`upstream/native/build/tvos/patched/`），
-  打不上构建直接失败，需按新版核心重做补丁。`python3 scripts/build_tvos.py --test-overlay` 在本机跑它们的 Go 测试。
+  打不上构建直接失败，需按新版核心重做补丁；编出的核心里查不到补丁（`_DuanjuReviveStream`、`/__guoapp_health`）也会失败。
+  `python3 scripts/build_tvos.py --test-overlay` 在本机跑它们的 Go 测试，
+  `python3 -m unittest discover -s scripts -p 'test_*.py'` 跑构建 / 部署脚本自己的测试。
   不要直接改 `upstream/` 里的文件。
 
 ### 同步上游核心
