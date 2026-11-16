@@ -72,12 +72,13 @@ jobs:
       - run: go test -race ./...
         working-directory: upstream/native
         continue-on-error: true
-      # 本仓库自带的核心补丁（fork/）的测试：补丁依赖上游核心的内部结构，上游改了这里会先报出来。
+      # 本仓库自带的核心补丁（fork/）的测试：补丁依赖上游核心的内部结构，打不上或测不过就不出包。
       - run: python3 scripts/build_tvos.py --test-overlay
-        continue-on-error: true
+      # 构建 / 部署脚本自己的测试（锁文件校验、核心标记、补丁检查、部署收尾）。
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   tvos:
-    needs: prepare
+    needs: [prepare, checks]
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
