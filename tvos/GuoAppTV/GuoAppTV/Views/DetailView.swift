@@ -120,6 +120,14 @@ struct DetailView: View {
                     // 详情里的分集数作为追剧更新的基准（与 followCheck 同一种计数）。
                     store.toggleFollow(drama, knownEpisodes: detail?.episodes.count)
                 }
+                // 只有剧带着出品方数据时才有入口：现在的红果站源模块不给出品方，核心也没有 producerWorks，入口不显示。
+                if displayDrama.source == "hongguo", displayDrama.producer?.isEmpty == false {
+                    TVSecondaryLink(
+                        title: "出品方",
+                        icon: "building.2",
+                        value: ProducerRoute(drama: displayDrama)
+                    )
+                }
             }
         }
     }

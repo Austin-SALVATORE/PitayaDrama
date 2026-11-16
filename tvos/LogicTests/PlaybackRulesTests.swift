@@ -1,35 +1,60 @@
+import Foundation
 import Testing
 @testable import GuoAppLogic
 
 /// 播放规则的特征测试：锁住播放页现有行为（预取、进度节流、换集时预取是否保留）。
 struct PlaybackRulesTests {
-    @Test func prefetchTriggersTenSecondsBeforeEnd() {
+    /// 全屏播放提前 60 秒预取（lukaschan 2.51）。
+    @Test func fullScreenPrefetchTriggersSixtySecondsBeforeEnd() {
+        let lead = PlaybackRules.fullScreenPrefetchLead
         #expect(PlaybackRules.prefetchIndex(
-            position: 90, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 40, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == 1)
         #expect(PlaybackRules.prefetchIndex(
-            position: 85, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 39, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
+    }
+
+    /// 推荐页 hero（默认）仍是 1.0.0 的 10 秒，免得早早的预取挡住用户点的起播与实时预览。
+    @Test func defaultPrefetchTriggersTenSecondsBeforeEnd() {
+        let lead = PlaybackRules.defaultPrefetchLead
+        #expect(lead == 10)
+        #expect(PlaybackRules.prefetchIndex(
+            position: 90, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+        ) == 1)
+        #expect(PlaybackRules.prefetchIndex(
+            position: 50, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+        ) == nil)
+    }
+
+    /// 预取好的计划放太久，核心可能已把它的播放会话当闲置丢掉（10 分钟）：5 分钟以内才直接用。
+    @Test func oldPrefetchedPlansAreNotUsed() {
+        let resolved = Date(timeIntervalSinceReferenceDate: 1_000)
+        #expect(PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(60)))
+        #expect(PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(299)))
+        #expect(!PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(300)))
+        #expect(!PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(900)))
+        #expect(PlaybackRules.prefetchedPlanMaxAge < 600)
     }
 
     @Test func prefetchNotForLastEpisode() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 2, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 2, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
     }
 
     @Test func prefetchNotTwice() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: 1, prefetchInFlight: false
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: 1, prefetchInFlight: false
         ) == nil)
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: true
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: true
         ) == nil)
     }
 
     @Test func prefetchNotAtZeroDuration() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 0, duration: 0, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 0, duration: 0, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
     }
 
@@ -52,5 +77,60 @@ struct PlaybackRulesTests {
         #expect(!PlaybackRules.disablesIdleTimer(hasPlayer: true, paused: true, keepsScreenAwake: true))
         #expect(!PlaybackRules.disablesIdleTimer(hasPlayer: false, paused: false, keepsScreenAwake: true))
         #expect(!PlaybackRules.disablesIdleTimer(hasPlayer: true, paused: false, keepsScreenAwake: false))
+    }
+}
+
+/// 复用句柄换集时，上一集的进度不能报到新的一集名下。
+struct ProgressGateTests {
+    @Test func reportsOnlyWhileTheStartedFileIsOpen() {
+        var gate = ProgressGate()
+        #expect(!gate.isOpen)
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+    }
+
+    /// 手动选集：unload 立刻关上；旧文件的 END_FILE、新一集起播都不会提前打开，新文件打开后才报。
+    @Test func manualEpisodeSwitchWaitsForTheNewFile() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.fileLoaded()
+        gate.stop()
+        #expect(!gate.isOpen)
+        gate.fileEnded()
+        gate.fileLoaded()
+        #expect(!gate.isOpen, "a late event of the unloaded file must not reopen the gate")
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+    }
+
+    /// 自动连播（复用句柄 loadfile replace）：上一集的 END_FILE 晚到也只是关上，新文件打开后再报。
+    @Test func autoAdvanceIgnoresThePreviousFileEnding() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.fileLoaded()
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+    }
+
+    /// 上一集还没打开就换了：它晚到的 FILE_LOADED 后面跟着它的 END_FILE，门最后跟着新文件走。
+    @Test func lateEventsOfAnAbandonedFileEndClosed() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.start()
+        gate.fileLoaded()
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
     }
 }

@@ -25,6 +25,9 @@ struct SearchView: View {
             .navigationDestination(for: Drama.self) { drama in
                 DetailView(drama: drama)
             }
+            .navigationDestination(for: ProducerRoute.self) { route in
+                ProducerView(drama: route.drama)
+            }
             .playbackLauncher(launcher)
         }
         .onAppear {

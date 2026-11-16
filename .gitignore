@@ -2,6 +2,8 @@
 build/
 dist/
 upstream/native/build/
+# 内置站源模块的下载缓存（scripts/build_tvos.py）：模块仓库没有许可证，模块文件不入库
+/build/modules/
 tvos/DuanjuCore/*.xcframework/
 tvos/DuanjuCore/DuanjuCore.variant
 tvos/GuoAppTV/GuoAppTV/DuanjuCore.h

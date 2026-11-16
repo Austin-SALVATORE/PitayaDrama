@@ -52,7 +52,7 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         VStack(alignment: .leading, spacing: TVTheme.sectionSpacing) {
                             followGroup
-                            if appState.allSources { sourceGroup }
+                            if appState.offersSourceChoice { sourceGroup }
                             storageAboutGroup
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -220,8 +220,7 @@ struct SettingsView: View {
 
     private var sourceGroup: some View {
         TVSettingGroup(title: "站源") {
-            let sites = SourceSite.available(allSources: appState.allSources)
-            ForEach(Array(sites.enumerated()), id: \.element.id) { index, site in
+            ForEach(Array(appState.sources.enumerated()), id: \.element.id) { index, site in
                 if index > 0 {
                     TVSettingDivider()
                 }
@@ -254,8 +253,7 @@ struct SettingsView: View {
         TVSettingGroup(title: "存储与关于") {
             infoRow("已用空间", storageBytes.map { StorageSize.label(bytes: $0) } ?? "正在计算…")
             TVSettingDivider()
-            infoRow("站源", SourceSite.available(allSources: appState.allSources)
-                .first { $0.id == appState.selectedSource }?.name ?? appState.selectedSource)
+            infoRow("站源", appState.sources.first { $0.id == appState.selectedSource }?.name ?? appState.selectedSource)
             TVSettingDivider()
             infoRow("版本", appVersion)
             TVSettingDivider()

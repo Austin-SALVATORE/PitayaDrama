@@ -7,18 +7,21 @@ import SwiftUI
 final class AppState: ObservableObject {
     @Published var initialized = false
     @Published var initializeError: String?
-    @Published var allSources = false
-    @Published var selectedSource = "hongguo"
+    /// 核心里可用的站源（initialize 回的 sources）。
+    @Published private(set) var sources: [SourceSite] = []
+    @Published var selectedSource = SourceSite.defaultID
+
+    /// 不止一个站源时才显示站源选择（剧场的站源行、「我的」里的站源分组）。
+    var offersSourceChoice: Bool { sources.count > 1 }
 
     /// 启动本地核心；已初始化时直接返回。失败时保留错误文案供界面重试。
     func bootstrap() async {
         guard !initialized else { return }
         initializeError = nil
         do {
-            allSources = try await CoreClient.shared.initialize()
-            if !SourceSite.available(allSources: allSources).contains(where: { $0.id == selectedSource }) {
-                selectedSource = "hongguo"
-            }
+            let sites = try await CoreClient.shared.initialize()
+            sources = sites
+            selectedSource = SourceSite.selection(selectedSource, among: sites)
             initialized = true
         } catch {
             initializeError = error.localizedDescription
@@ -26,41 +29,16 @@ final class AppState: ObservableObject {
     }
 }
 
-// MARK: - 追剧 / 观看进度（本地持久化）
-
-struct WatchProgress: Codable, Equatable {
-    var drama: Drama
-    var episode: Int
-    var episodeTitle: String
-    var position: Double
-    var duration: Double
-    var updatedAt: Date
-
-    var episodeKey: String { "\(drama.id)#\(episode)" }
-}
-
-struct FollowedDrama: Codable, Equatable {
-    var drama: Drama
-    var followedAt: Date
-    /// 追剧更新（FollowUpdate）：用户已知的集数；nil 表示还没有基准（第一次检查时设）。
-    /// 以下三个字段都是可选的：第四阶段之前存下的追剧照样能读出来。
-    var knownEpisodes: Int?
-    /// 最近一次检查（核心 followCheck）看到的集数。
-    var latestEpisodes: Int?
-    var checkedAt: Date?
-}
-
-private struct PersistedState: Codable {
-    var follows: [FollowedDrama] = []
-    var progress: [WatchProgress] = []
-}
+// MARK: - 追剧 / 观看进度（本地持久化，存盘格式见 Logic/PersistedState.swift）
 
 @MainActor
 final class Store: ObservableObject {
     @Published private(set) var follows: [FollowedDrama] = []
     @Published private(set) var progress: [WatchProgress] = []
 
-    private let file: URL
+    private let stateFile: StateFile
+    /// tv-state.json 读不出来、又没能挪到旁边时为 false：这次启动不写盘，免得把它盖掉。
+    private var savesState = true
 
     init() {
         // 与核心目录同理：tvOS 真机上 Application Support 只读，
@@ -68,21 +46,32 @@ final class Store: ObservableObject {
         let directory = FileManager.default.urls(
             for: .cachesDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        file = directory.appendingPathComponent("tv-state.json")
+        stateFile = StateFile(url: directory.appendingPathComponent("tv-state.json"))
         load()
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: file) else { return }
-        guard let state = try? JSONDecoder().decode(PersistedState.self, from: data) else { return }
-        follows = state.follows
-        progress = state.progress
+        switch stateFile.load() {
+        case .state(let state):
+            follows = state.follows
+            progress = state.progress
+        case .missing:
+            break
+        case .unreadable(let reason, let movedTo?):
+            DiagnosticLog.record("tv-state.json unreadable, moved to \(movedTo.lastPathComponent): \(reason)")
+        case .unreadable(let reason, nil):
+            savesState = false
+            DiagnosticLog.record("tv-state.json unreadable and could not be moved aside, not saving this launch: \(reason)")
+        }
     }
 
     private func persist() {
-        let state = PersistedState(follows: follows, progress: progress)
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        try? data.write(to: file, options: .atomic)
+        guard savesState else { return }
+        do {
+            try stateFile.save(PersistedState(follows: follows, progress: progress))
+        } catch {
+            DiagnosticLog.record("tv-state.json save failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - 追剧更新

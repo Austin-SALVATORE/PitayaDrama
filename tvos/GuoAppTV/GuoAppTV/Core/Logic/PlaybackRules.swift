@@ -3,22 +3,30 @@ import Foundation
 /// 播放页的纯规则（预取下一集、进度落盘节流、换集时预取是否还能用），
 /// 由 PlaybackSession 调用；抽出来是为了在 Mac 上单测。
 enum PlaybackRules {
-    /// 距本集结束还剩多少秒时开始预取下一集。
-    static let prefetchLeadSeconds = 10.0
+    /// 距本集结束还剩多少秒时开始预取下一集（PlaybackSession.prefetchLead）。
+    /// 默认 10 秒（1.0.0 的值，推荐页 hero 用）：起播、换线路、释放在核心里一个一个来，预取解析慢时
+    /// 会挡住用户点的起播（含「接下来」停留 1 秒的实时预览），hero 预取得越早，挡住的机会越多。
+    static let defaultPrefetchLead = 10.0
+    /// 全屏播放 60 秒（lukaschan 2.51）：解析慢的站源在 10 秒内经常回不来，提前到一分钟让切集时计划已就绪。
+    static let fullScreenPrefetchLead = 60.0
+    /// 预取好的计划最多用到多久以后：核心把 10 分钟没用过的播放会话当闲置丢掉
+    /// （upstream/native/core/app_stream.go 的 nativeOpen），留出一半余量；更旧的在切集时丢掉重新解析。
+    static let prefetchedPlanMaxAge: TimeInterval = 300
     /// 进度落盘间隔（秒），与 Dart 侧一致。
     static let saveIntervalSeconds = 5.0
 
-    /// 还剩 10 秒（且大于 0）时返回要预取的下一集下标；最后一集、已预取过或正在预取时为 nil。
+    /// 还剩 lead 秒内（且大于 0）时返回要预取的下一集下标；最后一集、已预取过或正在预取时为 nil。
     static func prefetchIndex(
         position: Double,
         duration: Double,
+        lead: Double,
         currentIndex: Int,
         episodeCount: Int,
         prefetchedIndex: Int?,
         prefetchInFlight: Bool
     ) -> Int? {
         let remaining = duration - position
-        guard remaining <= prefetchLeadSeconds, remaining > 0 else { return nil }
+        guard remaining <= lead, remaining > 0 else { return nil }
         let nextIndex = currentIndex + 1
         guard nextIndex < episodeCount else { return nil }
         guard prefetchedIndex != nextIndex, !prefetchInFlight else { return nil }
@@ -36,8 +44,41 @@ enum PlaybackRules {
         keepsScreenAwake && hasPlayer && !paused
     }
 
+    /// 预取好的计划（resolvedAt 时解析好的）现在还能不能直接用。
+    static func prefetchedPlanIsUsable(resolvedAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(resolvedAt) < prefetchedPlanMaxAge
+    }
+
     /// 换到 target 集时，预取若是为它或它的下一集准备的就留着，否则释放。
     static func keepsPrefetch(prefetchedIndex: Int?, target: Int) -> Bool {
         prefetchedIndex == target || prefetchedIndex == target + 1
+    }
+}
+
+/// 播放器什么时候可以上报进度（PlayerController 每秒的 tick）。复用句柄换集时 stop / loadfile 都是异步的，
+/// 这段时间 mpv 的 time-pos 可能还是上一集的位置；报出去会把新的一集存成旧位置、按旧位置预取下一集。
+/// 所以只在 mpv 报出「这次加载的文件已打开」（FILE_LOADED）之后、这个文件结束（END_FILE）之前上报；
+/// 起播（start）先关上，卸下 / 停止（stop）后不再打开。mpv 的事件按发生顺序到达，上一集晚到的
+/// FILE_LOADED 后面一定跟着它自己的 END_FILE，不会把门留在打开。
+struct ProgressGate: Equatable, Sendable {
+    private(set) var isOpen = false
+    private var active = false
+
+    mutating func start() {
+        active = true
+        isOpen = false
+    }
+
+    mutating func fileLoaded() {
+        isOpen = active
+    }
+
+    mutating func fileEnded() {
+        isOpen = false
+    }
+
+    mutating func stop() {
+        active = false
+        isOpen = false
     }
 }

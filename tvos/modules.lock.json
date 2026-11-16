@@ -1,0 +1,13 @@
+{
+  "modules": [
+    {
+      "id": "hongguo",
+      "repo": "guoapp-modules/hongguo",
+      "tag": "v1.0.2",
+      "sha256": {
+        "manifest.json": "c91b038ac4f1e013111b26294143b7c66568f930b74bc7b218cf22ba738e6ab4",
+        "main.js": "8b05f083fbf0d941b4fec2faec60874c9a7989851f6f63fcfa47432a15547324"
+      }
+    }
+  ]
+}

@@ -1,92 +1,5 @@
 import Foundation
 
-// MARK: - 容错解析
-
-private func stringValue(_ dict: [String: Any], _ key: String) -> String {
-    dict[key] as? String ?? ""
-}
-
-private func intValue(_ dict: [String: Any], _ key: String) -> Int {
-    if let number = dict[key] as? NSNumber { return number.intValue }
-    if let text = dict[key] as? String, let number = Int(text) { return number }
-    return 0
-}
-
-private func stringList(_ dict: [String: Any], _ key: String) -> [String] {
-    (dict[key] as? [Any] ?? []).compactMap { $0 as? String }
-}
-
-// MARK: - 剧
-
-struct Drama: Identifiable, Hashable, Codable {
-    var id: String
-    var source: String
-    var sourceId: String
-    var title: String
-    var description: String
-    var cover: String
-    var episodes: Int
-    var category: String
-    var vip: Bool?
-    var heat: String
-    var views: String
-    var onlineDate: String
-    var tags: [String]
-    var releaseStatus: String
-    /// 评分（核心的 metadata 补全；旧版存下的剧没有这个字段，可选）。
-    var score: String?
-
-    var releaseLabel: String {
-        switch releaseStatus {
-        case "finished", "completed": return "已完结"
-        case "ongoing": return "连载中"
-        default: return ""
-        }
-    }
-
-    init(dict: [String: Any]) {
-        id = stringValue(dict, "id")
-        source = stringValue(dict, "source").isEmpty ? "hongguo" : stringValue(dict, "source")
-        sourceId = stringValue(dict, "sourceId")
-        title = stringValue(dict, "title").isEmpty ? "短剧" : stringValue(dict, "title")
-        description = stringValue(dict, "description")
-        cover = stringValue(dict, "cover")
-        episodes = intValue(dict, "episodes")
-        category = stringValue(dict, "category")
-        vip = dict["vip"] as? Bool
-        heat = dict["heat"].map { "\($0)" } ?? ""
-        views = dict["views"].map { "\($0)" } ?? ""
-        onlineDate = stringValue(dict, "onlineDate")
-        tags = stringList(dict, "tags")
-        releaseStatus = stringValue(dict, "releaseStatus")
-        let scoreText = stringValue(dict, "score")
-        score = scoreText.isEmpty ? nil : scoreText
-    }
-
-    /// 发给 Go 核心的 drama 结构，与 Dart 侧 Drama.toJson 对齐。
-    func requestJSON() -> [String: Any] {
-        var json: [String: Any] = [
-            "metadataSchema": 1,
-            "id": id,
-            "source": source,
-            "sourceId": sourceId,
-            "title": title,
-            "description": description,
-            "cover": cover,
-            "episodes": episodes,
-            "category": category,
-            "heat": heat,
-            "views": views,
-            "onlineDate": onlineDate,
-            "tags": tags,
-            "releaseStatus": releaseStatus,
-        ]
-        if let vip { json["vip"] = vip }
-        if let score { json["score"] = score }
-        return json
-    }
-}
-
 // MARK: - 分集
 
 /// 分集。核心返回的原始分集对象要在解析播放地址时原样回传（`resolve` 的
@@ -142,6 +55,24 @@ struct DramaDetail {
             return Episode(raw: row, fallback: index + 1)
         }
         warning = stringValue(dict, "warning")
+    }
+}
+
+/// 出品方页的导航路由值：与 Drama 一样走值链接 + navigationDestination
+/// 注册。不要用闭包目标链接跳出品方页——tvOS 16 上它会被父视图重绘
+/// 重复触发，把出品方页再盖到目标页上面。
+struct ProducerRoute: Hashable {
+    let drama: Drama
+}
+
+struct ProducerWorks {
+    let producer: String
+    let items: [Drama]
+
+    init(dict: [String: Any]) {
+        producer = stringValue(dict, "producer")
+        let rows = dict["items"] as? [Any] ?? []
+        items = rows.compactMap { ($0 as? [String: Any]).map(Drama.init(dict:)) }
     }
 }
 
@@ -244,33 +175,6 @@ struct DanmakuPage {
                 timeMs: intValue(row, "timeMs")
             )
         }
-    }
-}
-
-// MARK: - 站源
-
-struct SourceSite: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let description: String
-
-    /// 与 Dart 侧 SourceSite.knownValues 对齐；站源列表由核心的 allSources 编译开关决定。
-    static func available(allSources: Bool) -> [SourceSite] {
-        let hongguo = SourceSite(id: "hongguo", name: "红果", description: "短剧 · 漫剧 · AI 剧")
-        guard allSources else { return [hongguo] }
-        return [
-            hongguo,
-            SourceSite(id: "dsd", name: "帝果", description: "分类视频 · 在线搜索"),
-            SourceSite(id: "sorani", name: "青空", description: "番剧 · 剧场动画 · 特摄"),
-            SourceSite(id: "guipian", name: "鬼片", description: "鬼片 · 电视剧 · 动漫"),
-            SourceSite(id: "hanxiaoquan", name: "韩小圈", description: "韩剧 · 韩国电影 · 综艺 · 动漫"),
-            SourceSite(id: "huangdou", name: "黄豆", description: "精选短剧"),
-            SourceSite(id: "huangju", name: "剧果", description: "热门 · 最新 · 分类短剧"),
-            SourceSite(id: "yeguo", name: "野果", description: "分类短剧 · 在线搜索"),
-            SourceSite(id: "huangguo-video", name: "黄果视频", description: "视频剧集"),
-            SourceSite(id: "huangguoai", name: "黄果 AI", description: "AI 短剧"),
-            SourceSite(id: "cloudfront", name: "黄果旧版", description: "旧 API 剧库"),
-        ]
     }
 }
 

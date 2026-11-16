@@ -45,6 +45,7 @@ actor CoreClient {
     private var categoriesCache: [String: CacheEntry<[Category]>] = [:]
     private var rankingBoardsCache: CacheEntry<[RankingBoard]>?
     private var rankingsCache: [String: CacheEntry<RankingPage>] = [:]
+    private var producerCache: [String: CacheEntry<ProducerWorks>] = [:]
 
     private func isFresh(_ timestamp: Date) -> Bool {
         Date().timeIntervalSince(timestamp) < Self.cacheTTL
@@ -58,6 +59,7 @@ actor CoreClient {
             rankingBoardsCache = nil
         }
         rankingsCache = rankingsCache.filter { isFresh($0.value.timestamp) }
+        producerCache = producerCache.filter { isFresh($0.value.timestamp) }
     }
 
     /// 清空首页目录缓存（首页按播放/暂停键手动刷新时调用，强制重新拉取）。
@@ -126,24 +128,41 @@ actor CoreClient {
         return playbackSequence
     }
 
-    /// 初始化核心。返回核心编译时是否包含全部站源（--all-sources）。
-    func initialize() async throws -> Bool {
-        if initialized { return allSources }
+    /// 初始化核心，返回核心里可用的站源（构建时内置的站源模块）。
+    func initialize() async throws -> [SourceSite] {
+        if initialized { return sources }
         // tvOS 沙盒：真机上 Documents / Application Support 只读，只有
         // Caches 与 tmp 可写。核心的数据目录必须放在 Caches；代价是
         // 系统在存储不足时可能回收 Caches（缓存、海报、进度会丢失，
         // 属于 tvOS 的固有约束，下载等功能也因此不做）。
+        // 核心另要一个可随时清空的缓存目录（片库、榜单、封面），放在数据目录下的 core-cache。
         let directory = FileManager.default.urls(
             for: .cachesDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try await call(["action": "initialize", "directory": directory.path])
-        allSources = data["allSources"] as? Bool ?? false
+        let cache = directory.appendingPathComponent("core-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let stamp = Bundle.main.object(forInfoDictionaryKey: BundledModuleRefresh.infoKey) as? String ?? ""
+        do {
+            let removed = try BundledModuleRefresh.apply(stamp: stamp, dataDirectory: directory)
+            if !removed.isEmpty {
+                DiagnosticLog.record("bundled modules changed (\(stamp)), reinstalling: \(removed.joined(separator: ", "))")
+            }
+        } catch {
+            DiagnosticLog.record("bundled module refresh failed: \(error.localizedDescription)")
+        }
+        let data = try await call(["action": "initialize", "directory": directory.path, "cache": cache.path])
+        let sites = SourceSite.list(fromCore: data["sources"] as? [Any] ?? [])
+        guard !sites.isEmpty else {
+            // 不记已初始化：重试时再问一次核心。
+            let modules = (try? await call(["action": "modules"]))?["items"] as? [Any] ?? []
+            throw CoreError.message(SourceSite.unavailableMessage(moduleRows: modules))
+        }
+        sources = sites
         initialized = true
-        return allSources
+        return sites
     }
 
-    private(set) var allSources = false
+    private(set) var sources: [SourceSite] = []
 
     func categories(source: String, force: Bool = false) async throws -> [Category] {
         if !force, let entry = categoriesCache[source], isFresh(entry.timestamp) {
@@ -202,15 +221,19 @@ actor CoreClient {
     }
 
     /// 核心存在本地的推荐（上次取到的那份，不联网、立刻返回）：推荐页与「大家都在看」启动时先显示它。
-    func cachedRecommendations(feed: String = "home_feed") async throws -> CatalogPage {
-        let data = try await call(["action": "cachedRecommendations", "category": feed])
+    /// 推荐与联想词都必须带 source，核心不再默认红果（不带时回「当前版本不包含此站源」）。
+    func cachedRecommendations(source: String, feed: String = "home_feed") async throws -> CatalogPage {
+        let data = try await call(["action": "cachedRecommendations", "source": source, "category": feed])
         return CatalogPage(dict: data)
     }
 
-    /// 红果推荐流（推荐页 hero）：核心自己缓存，返回累积的整份列表；more 时再往后取一页。
-    func recommendations(feed: String = "home_feed", more: Bool = false, force: Bool = false) async throws -> CatalogPage {
+    /// 推荐流（推荐页 hero）：核心自己缓存，返回累积的整份列表；more 时再往后取一页。
+    func recommendations(
+        source: String, feed: String = "home_feed", more: Bool = false, force: Bool = false
+    ) async throws -> CatalogPage {
         let data = try await call([
             "action": "recommendations",
+            "source": source,
             "category": feed,
             "command": more ? "more" : "",
             "force": force,
@@ -244,8 +267,8 @@ actor CoreClient {
         return result
     }
 
-    func suggestions(query: String) async throws -> [String] {
-        let data = try await call(["action": "suggestions", "query": query], session: "suggestions")
+    func suggestions(source: String, query: String) async throws -> [String] {
+        let data = try await call(["action": "suggestions", "source": source, "query": query], session: "suggestions")
         return (data["items"] as? [Any] ?? []).compactMap { $0 as? String }
     }
 
@@ -261,6 +284,21 @@ actor CoreClient {
     func detail(drama: Drama) async throws -> DramaDetail {
         let data = try await call(["action": "detail", "drama": drama.requestJSON()])
         return DramaDetail(dict: data)
+    }
+
+    /// 出品方剧作：点入详情页的出品方入口后才调用，核心先按剧名定出品方，
+    /// 再拉该出品方的全部剧作（已补上线日期，供按最新/最热排序）。
+    func producerWorks(drama: Drama) async throws -> ProducerWorks {
+        // 出品方检索要几十秒，结果按剧缓存（同目录缓存 TTL）：页面重建或
+        // 返回时直接用缓存，不再重复检索。
+        if let entry = producerCache[drama.id], isFresh(entry.timestamp) {
+            return entry.value
+        }
+        let data = try await call(["action": "producerWorks", "drama": drama.requestJSON()])
+        let result = ProducerWorks(dict: data)
+        purgeExpiredCache()
+        producerCache[drama.id] = CacheEntry(value: result, timestamp: Date())
+        return result
     }
 
     func resolve(drama: Drama, episode: Episode, quality: Int = 0) async throws -> PlaybackPlan {

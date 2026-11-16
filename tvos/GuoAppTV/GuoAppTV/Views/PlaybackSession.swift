@@ -33,19 +33,31 @@ final class PlaybackSession: ObservableObject {
 
     private var startPosition: Double
     private var lastSavedPosition = -1.0
+    /// 本集最后真正播到的位置（播放器失败后它自己的进度会清零，重新起播要用这个）。
+    private var lastPlayedPosition = 0.0
     /// 当前这集的播放地址是在本机播放服务的第几代时拿到的（见 GatewayGeneration）。
     private var planGeneration = GatewayGeneration()
-    /// 下一集预取好的播放计划（还剩 10 秒时后台解析好，切集时直接用）。
+    /// 还剩多少秒时预取下一集：默认 1.0.0 的 10 秒（推荐页 hero），全屏播放页传 60 秒（见 PlaybackRules）。
+    let prefetchLead: Double
+    /// 下一集预取好的播放计划（还剩 prefetchLead 秒时后台解析好，切集时直接用）。
     private var prefetchedPlan: PlaybackPlan?
+    /// 预取的计划是什么时候解析好的：放太久（PlaybackRules.prefetchedPlanMaxAge）就不用了。
+    private var prefetchedAt = Date.distantPast
     private var prefetchedGeneration = GatewayGeneration()
     /// 预取针对的分集下标（成功或失败都记录，避免失败后反复重试刷接口）。
     private var prefetchedIndex: Int?
     private var prefetchTask: Task<Void, Never>?
+    /// 下一集媒体预热（拉播放列表与首个分片，让 CDN 边缘与代理连接先热起来）。
+    private var warmTask: Task<Void, Never>?
     /// 当前这次换集 / 重试的加载：新的加载开始或停止时取消旧的，
     /// 只让最后一次加载起播（load() 在解析返回后检查取消）。
     private var loadTask: Task<Void, Never>?
 
-    init(drama: Drama, episodes: [Episode], startIndex: Int, startPosition: Double, store: Store, controller: PlayerController) {
+    init(
+        drama: Drama, episodes: [Episode], startIndex: Int, startPosition: Double, store: Store,
+        controller: PlayerController, prefetchLead: Double = PlaybackRules.defaultPrefetchLead
+    ) {
+        self.prefetchLead = prefetchLead
         self.drama = drama
         self.episodes = episodes
         self.store = store
@@ -75,22 +87,26 @@ final class PlaybackSession: ObservableObject {
         startLoad()
     }
 
-    /// 播放中选集：与详情页点分集一致，从头播放。先存好旧集进度并停掉旧句柄；
-    /// 预取若不是为新位置（本集或下一集）准备的，释放掉，避免用到过期地址。
+    /// 播放中选集：与详情页点分集一致，从头播放。先存好旧集进度并卸下旧集
+    /// （保留句柄，切集时复用）；预取若不是为新位置（本集或下一集）准备的，
+    /// 释放掉，避免用到过期地址。
     func playEpisode(at index: Int) {
         guard index != currentIndex, episodes.indices.contains(index) else { return }
         saveProgress()
-        controller.halt()
+        controller.unload()
         if !PlaybackRules.keepsPrefetch(prefetchedIndex: prefetchedIndex, target: index) {
             if let stale = prefetchedPlan {
                 Task { try? await CoreClient.shared.release(session: stale.session) }
             }
             prefetchedPlan = nil
             prefetchedIndex = nil
+            warmTask?.cancel()
+            warmTask = nil
         }
         currentIndex = index
         startPosition = 0
         lastSavedPosition = -1
+        lastPlayedPosition = 0
         startLoad()
     }
 
@@ -100,6 +116,8 @@ final class PlaybackSession: ObservableObject {
         controller.stop()
         prefetchTask?.cancel()
         prefetchTask = nil
+        warmTask?.cancel()
+        warmTask = nil
         loadTask?.cancel()
         loadTask = nil
         let sessions = [plan?.session, prefetchedPlan?.session].compactMap { $0 }
@@ -124,25 +142,39 @@ final class PlaybackSession: ObservableObject {
         }
         error = nil
         let episode = episodes[currentIndex]
-        // 优先用预取好的计划（上一集还剩 10 秒时已后台解析好），
+        // 优先用预取好的计划（上一集还剩 prefetchLead 秒时已后台解析好），
         // 切集时免去再等解析地址，是衔接卡顿的主因之一。
         if prefetchedIndex == currentIndex {
+            // 预取还在路上（解析慢于本集剩余时长）：等它回来再用，不要另起一次解析——
+            // 核心里新的播放请求会取消进行中的那个（见 CoreRoute），重发等于把等待再算一遍。
+            if prefetchedPlan == nil, let inFlight = prefetchTask {
+                await inFlight.value
+                guard !Task.isCancelled else { return }
+            }
             let cached = prefetchedPlan
             prefetchedPlan = nil
             prefetchedIndex = nil
-            if let cached {
+            warmTask?.cancel()
+            warmTask = nil
+            if let cached, PlaybackRules.prefetchedPlanIsUsable(resolvedAt: prefetchedAt, now: Date()) {
                 plan = cached
                 planGeneration = prefetchedGeneration
                 controller.play(plan: cached, start: startPosition, danmakuEnabled: danmakuEnabled, speed: playbackSpeed)
                 return
             }
-            // 预取失败过：直接走正常解析（不重试预取）。
+            if let cached {
+                // 放太久了，核心可能已把它的播放会话当闲置丢掉：释放、重新解析。
+                DiagnosticLog.record("prefetched plan discarded after \(Int(Date().timeIntervalSince(prefetchedAt))) s")
+                Task { try? await CoreClient.shared.release(session: cached.session) }
+            }
+            // 预取失败过或放太久：直接走正常解析（不重试预取）。
         }
         do {
+            // 代数在要地址之前记（见 GatewayRecovery.shouldRestart）。
+            let generation = await CoreClient.shared.gatewayGeneration
             let resolved = try await CoreClient.shared.resolve(
                 drama: drama, episode: episode, quality: preferredQuality
             )
-            let generation = await CoreClient.shared.gatewayGeneration
             guard !Task.isCancelled else { return }
             plan = resolved
             planGeneration = generation
@@ -176,6 +208,7 @@ final class PlaybackSession: ObservableObject {
             currentIndex += 1
             startPosition = 0
             lastSavedPosition = -1
+            lastPlayedPosition = 0
             startLoad()
         } else {
             onReachedEnd?()
@@ -190,10 +223,9 @@ final class PlaybackSession: ObservableObject {
         await CoreClient.shared.reviveGateway()
         let generation = await CoreClient.shared.gatewayGeneration
         guard self.plan?.session == plan.session else { return }
-        if generation != planGeneration {
+        if GatewayRecovery.shouldRestart(planURL: plan.url, planGeneration: planGeneration, current: generation) {
             DiagnosticLog.record("playback restarted: the gateway was lost since this episode started")
-            let position = controller.progress.position
-            if position > 0 { startPosition = position }
+            startPosition = GatewayRecovery.restartPosition(lastPlayed: lastPlayedPosition, startPosition: startPosition)
             Task { try? await CoreClient.shared.release(session: plan.session) }
             startLoad()
             return
@@ -207,12 +239,14 @@ final class PlaybackSession: ObservableObject {
                 self.error = error.localizedDescription
             }
         } else {
-            self.error = "播放失败，请返回重试"
+            let detail = controller.lastError.isEmpty ? controller.debugInfo : controller.lastError
+            self.error = detail.isEmpty ? "播放失败，请返回重试" : "播放失败，请返回重试（\(detail)）"
         }
     }
 
     func handleProgress(position: Double, duration: Double) {
         guard position > 0, duration > 0 else { return }
+        lastPlayedPosition = position
         maybePrefetchNext(position: position, duration: duration)
         // 与 Dart 侧一致：约每 5 秒落一次进度，避免频繁写盘。
         guard PlaybackRules.shouldSaveProgress(position: position, lastSaved: lastSavedPosition) else { return }
@@ -220,12 +254,13 @@ final class PlaybackSession: ObservableObject {
         saveProgress(position: position, duration: duration)
     }
 
-    /// 当前集还剩 10 秒时，后台解析下一集播放地址（预取）。
+    /// 当前集还剩 prefetchLead 秒时，后台解析下一集播放地址（预取），解析成功再预热媒体通道。
     /// 切集时直接用预取好的计划，免去再等解析地址。
     private func maybePrefetchNext(position: Double, duration: Double) {
         guard let nextIndex = PlaybackRules.prefetchIndex(
             position: position,
             duration: duration,
+            lead: prefetchLead,
             currentIndex: currentIndex,
             episodeCount: episodes.count,
             prefetchedIndex: prefetchedIndex,
@@ -235,18 +270,21 @@ final class PlaybackSession: ObservableObject {
         let episode = episodes[nextIndex]
         prefetchTask = Task {
             defer { prefetchTask = nil }
+            let generation = await CoreClient.shared.gatewayGeneration
             guard let plan = try? await CoreClient.shared.resolve(
                 drama: drama, episode: episode, quality: preferredQuality
             ) else { return }
-            let generation = await CoreClient.shared.gatewayGeneration
-            // 解析完成时若用户已不在触发那集（已切集/已退出），
-            // 预取的计划用不上，释放其会话避免泄漏。
-            guard !Task.isCancelled, currentIndex + 1 == nextIndex else {
+            // 解析完成时若用户已不在触发那集（已切走/已退出），
+            // 预取的计划用不上，释放其会话避免泄漏；
+            // 若已经自动切到这一集（load() 在等这份计划），同样算命中。
+            guard !Task.isCancelled, currentIndex + 1 == nextIndex || currentIndex == nextIndex else {
                 try? await CoreClient.shared.release(session: plan.session)
                 return
             }
             prefetchedGeneration = generation
+            prefetchedAt = Date()
             prefetchedPlan = plan
+            warmUpNextMedia(plan: plan)
         }
     }
 
@@ -264,5 +302,54 @@ final class PlaybackSession: ObservableObject {
             duration: duration,
             updatedAt: Date()
         ))
+    }
+
+    // MARK: - 下一集媒体预热
+
+    /// 预取解析成功后，把下一集的媒体通道先热起来：HLS 拉一遍播放列表并取首个分片的
+    /// 前 128KB，直链文件取最前面 2 字节。目的不是替播放器下载数据（播放器打开文件
+    /// 仍走自己的连接），而是让 DNS、CDN 边缘缓存（首分片回源）与本地代理的上游连接
+    /// 提前就绪，削掉切集打开文件时最冷的那一段。全程尽力而为，失败静默放弃。
+    private func warmUpNextMedia(plan: PlaybackPlan) {
+        warmTask?.cancel()
+        let urlString = plan.url
+        let headers = plan.local ? [:] : plan.headers
+        warmTask = Task.detached {
+            await Self.warmMedia(urlString: urlString, headers: headers)
+        }
+    }
+
+    nonisolated private static func warmMedia(urlString: String, headers: [String: String]) async {
+        guard let url = URL(string: urlString) else { return }
+        func request(_ target: URL, range: String?) -> URLRequest {
+            var req = URLRequest(url: target, timeoutInterval: 15)
+            for (key, value) in headers { req.setValue(value, forHTTPHeaderField: key) }
+            if let range { req.setValue(range, forHTTPHeaderField: "Range") }
+            return req
+        }
+        do {
+            if urlString.contains(".m3u8") {
+                var playlistURL = url
+                // 主列表 → 变体列表 → 媒体列表，最多跟两层。
+                for _ in 0..<2 {
+                    let (data, _) = try await URLSession.shared.data(for: request(playlistURL, range: nil))
+                    guard let text = String(data: data, encoding: .utf8) else { return }
+                    let firstURI = text.split(separator: "\n")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .first { !$0.isEmpty && !$0.hasPrefix("#") }
+                    guard let firstURI, let next = URL(string: firstURI, relativeTo: playlistURL)?.absoluteURL else { return }
+                    if text.contains("#EXT-X-STREAM-INF") {
+                        playlistURL = next
+                        continue
+                    }
+                    _ = try? await URLSession.shared.data(for: request(next, range: "bytes=0-131071"))
+                    return
+                }
+            } else {
+                _ = try? await URLSession.shared.data(for: request(url, range: "bytes=0-1"))
+            }
+        } catch {
+            // 预热失败不影响播放，静默放弃。
+        }
     }
 }

@@ -57,6 +57,9 @@ struct HomeView: View {
             .navigationDestination(for: Drama.self) { drama in
                 DetailView(drama: drama)
             }
+            .navigationDestination(for: ProducerRoute.self) { route in
+                ProducerView(drama: route.drama)
+            }
             .playbackLauncher(launcher)
             .onAppear {
                 // 首次进入首页且为红果站源时，默认展开榜单，不用每次手动点。
@@ -75,7 +78,7 @@ struct HomeView: View {
 
     private var catalogSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if appState.allSources {
+            if appState.offersSourceChoice {
                 sourceRow
             }
             categoryRow
@@ -165,7 +168,7 @@ struct HomeView: View {
     private var sourceRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
-                ForEach(SourceSite.available(allSources: appState.allSources)) { site in
+                ForEach(appState.sources) { site in
                     TVChip(title: site.name, isSelected: site.id == appState.selectedSource) {
                         // 切到红果默认展开榜单，其他站源默认全部。
                         selectedCategory = site.id == "hongguo" ? Self.rankingCategoryId : ""

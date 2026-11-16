@@ -1,6 +1,7 @@
 package core
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -8,8 +9,8 @@ import (
 	"time"
 )
 
-// 火龙果短剧（tvOS 分支）自带的核心补丁，不在上游仓库里：scripts/build_tvos.py 用 go build -overlay
-// 把本文件编进 native/core，upstream/ 子模块本身不改。
+// 本仓库自带的挂起恢复补丁，不在上游核心里：scripts/build_tvos.py 用 go build -overlay 把本文件编进
+// native/core（健康端点来自 fork/patches/app_stream.go.patch），upstream/ 子模块本身不改。
 //
 // 问题：tvOS 在 App 挂起时（切到后台几分钟、电视休眠）会回收监听中的套接字。核心的本机播放服务
 // （newNativeStreamServer，127.0.0.1 随机端口）只创建一次，被回收后所有播放地址都连不上
@@ -52,14 +53,26 @@ func (stream *nativeStreamServer) host() string {
 	return strings.TrimPrefix(stream.address, "http://")
 }
 
-// 连一下自己的地址：回环上立刻有结果，连不上就是监听没了。
+// 问一下自己的健康端点：TCP 能连上只证明端口上有东西在听，回了 204 才证明是
+// 本机播放服务本身在正常服务——端口被别的服务占了、HTTP 层卡死都算监听没了。
+// 探活不走代理、不复用连接、1 秒超时；健康端点不依赖任何会话与片源。
+// （据 GitHub issue #2 的建议由 TCP 拨号升级而来，guoapp2 同步同改。）
 func (stream *nativeStreamServer) listening() bool {
-	connection, err := net.DialTimeout("tcp4", stream.host(), time.Second)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true},
+		Timeout:   time.Second,
+	}
+	request, err := http.NewRequest(http.MethodHead, stream.address+"/__guoapp_health", nil)
 	if err != nil {
 		return false
 	}
-	_ = connection.Close()
-	return true
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	return response.StatusCode == http.StatusNoContent
 }
 
 // 关掉旧的（已失效的）HTTP 服务，在原地址重新监听，处理函数和会话沿用。

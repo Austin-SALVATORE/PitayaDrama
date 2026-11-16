@@ -97,7 +97,7 @@ final class SearchModel: ObservableObject {
             loading = false
         }
         guard !Task.isCancelled else { return }
-        let words = (try? await CoreClient.shared.suggestions(query: key)) ?? []
+        let words = (try? await CoreClient.shared.suggestions(source: source, query: key)) ?? []
         guard !Task.isCancelled else { return }
         suggestions = words.filter { $0 != key }
     }

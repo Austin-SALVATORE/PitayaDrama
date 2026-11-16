@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from app_build import BuildVariant, add_variant_argument
+from app_build import BuildVariant, add_variant_argument, variant_from
 from build_tvos import (app_name, build_core, project, read_version, require_core, resolve_packages, root, run,
                         verify_display_name, xcode_settings)
 
@@ -119,6 +119,21 @@ def build_signed_app(settings: DeploySettings, bundle_id: str, variant: BuildVar
     return application
 
 
+def launch_app(device_id: str, bundle_id: str, device_name: str) -> bool:
+    """安装之后顺手打开应用。打不开（最常见的是电视在休眠：「foreground app launch forbidden」）不算部署失败：
+    签名和安装都已完成，所以只提示、不报错退出，调用方（如每周续签的脚本）照常往下走。"""
+    result = subprocess.run(['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', device_id,
+                             '--terminate-existing', bundle_id], capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+    lines = [line.strip() for line in (result.stderr + '\n' + result.stdout).splitlines() if line.strip()]
+    reason = next((line for line in reversed(lines) if 'error' in line.lower() or 'forbidden' in line.lower()),
+                  lines[-1] if lines else f'devicectl 退出码 {result.returncode}')
+    print(f'应用已安装到 {device_name}，但没能打开：{reason}')
+    print('电视多半在休眠：唤醒电视后从主屏幕打开即可，签名与安装已经完成。')
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='签名构建并安装到 Apple TV 真机')
     parser.add_argument('--team', help='开发团队 Team ID')
@@ -129,11 +144,11 @@ def main() -> None:
     parser.add_argument('--save', action='store_true', help=f'把本次参数写入 {local_config.name}')
     add_variant_argument(parser)
     options = parser.parse_args()
+    variant = variant_from(options)
     settings = load_settings(options)
     if options.save:
         local_config.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2) + '\n')
         print('已保存部署参数到 ' + str(local_config))
-    variant = BuildVariant(options.all_sources)
     bundle_id = settings.bundle_id + ('.all' if variant.all_sources else '')
 
     print(f'==> 查找 Apple TV「{settings.device}」')
@@ -150,8 +165,7 @@ def main() -> None:
     run(['xcrun', 'devicectl', 'device', 'install', 'app', '--device', device_id, str(application)])
     if not options.no_launch:
         print('==> 启动')
-        run(['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', device_id,
-             '--terminate-existing', bundle_id])
+        launch_app(device_id, bundle_id, settings.device)
     print('完成。免费账号的描述文件 7 天后过期，届时重跑本脚本即可。')
 
 

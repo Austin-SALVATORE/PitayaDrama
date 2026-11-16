@@ -6,7 +6,7 @@ package main
 import "C"
 import "duanjuapp/native/core"
 
-// 火龙果短剧（tvOS 分支）自带的补丁，见 tvos/CoreOverlay/core/tvos_stream_revive.go。
+// 挂起恢复补丁的桥接出口，见 fork/core/tvos_stream_revive.go。
 // 返回的字符串由调用方用 DuanjuFree 释放。
 
 //export DuanjuReviveStream

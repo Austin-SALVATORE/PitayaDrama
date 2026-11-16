@@ -195,7 +195,8 @@ struct PlayerView: View {
             startIndex: startIndex,
             startPosition: startPosition,
             store: store,
-            controller: PlayerController()
+            controller: PlayerController(),
+            prefetchLead: PlaybackRules.fullScreenPrefetchLead
         ))
     }
 

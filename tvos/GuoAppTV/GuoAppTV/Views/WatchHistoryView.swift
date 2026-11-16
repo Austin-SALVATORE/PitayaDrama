@@ -50,6 +50,9 @@ struct WatchHistoryView: View {
         .navigationDestination(for: Drama.self) { drama in
             DetailView(drama: drama)
         }
+        .navigationDestination(for: ProducerRoute.self) { route in
+            ProducerView(drama: route.drama)
+        }
         .playbackLauncher(launcher)
         .task {
             // 开发验证用：启动参数 -GUOAppPlayFirstHistory YES 直接续播观看记录里的第一部（只对这次启动有效）。

@@ -24,9 +24,16 @@ class BuildVariant:
 
     @property
     def linker_flags(self):
-        return '-s -w -X duanjuapp/native/core.buildAllSources=' + str(self.all_sources).lower()
+        return '-s -w'
 
 
 def add_variant_argument(parser):
     parser.add_argument('--all-sources', action='store_true',
-                        help='构建包含全部站源的真果鉴；默认构建仅红果的火龙果短剧')
+                        help='构建包含全部站源的真果鉴（模块核心暂不支持）；默认构建仅红果的火龙果短剧')
+
+
+def variant_from(options):
+    # 核心的站源由构建时内置的模块决定（tvos/modules.lock.json），目前只有红果。
+    if options.all_sources:
+        raise SystemExit('模块核心目前只内置红果站源（tvos/modules.lock.json），暂时不能构建真果鉴（--all-sources）。')
+    return BuildVariant()
