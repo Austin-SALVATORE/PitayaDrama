@@ -1,35 +1,60 @@
+import Foundation
 import Testing
 @testable import GuoAppLogic
 
 /// 播放规则的特征测试：锁住播放页现有行为（预取、进度节流、换集时预取是否保留）。
 struct PlaybackRulesTests {
-    @Test func prefetchTriggersSixtySecondsBeforeEnd() {
+    /// 全屏播放提前 60 秒预取（lukaschan 2.51）。
+    @Test func fullScreenPrefetchTriggersSixtySecondsBeforeEnd() {
+        let lead = PlaybackRules.fullScreenPrefetchLead
         #expect(PlaybackRules.prefetchIndex(
-            position: 50, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 40, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == 1)
         #expect(PlaybackRules.prefetchIndex(
-            position: 30, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 39, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
+    }
+
+    /// 推荐页 hero（默认）仍是 1.0.0 的 10 秒，免得早早的预取挡住用户点的起播与实时预览。
+    @Test func defaultPrefetchTriggersTenSecondsBeforeEnd() {
+        let lead = PlaybackRules.defaultPrefetchLead
+        #expect(lead == 10)
+        #expect(PlaybackRules.prefetchIndex(
+            position: 90, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+        ) == 1)
+        #expect(PlaybackRules.prefetchIndex(
+            position: 50, duration: 100, lead: lead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+        ) == nil)
+    }
+
+    /// 预取好的计划放太久，核心可能已把它的播放会话当闲置丢掉（10 分钟）：5 分钟以内才直接用。
+    @Test func oldPrefetchedPlansAreNotUsed() {
+        let resolved = Date(timeIntervalSinceReferenceDate: 1_000)
+        #expect(PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(60)))
+        #expect(PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(299)))
+        #expect(!PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(300)))
+        #expect(!PlaybackRules.prefetchedPlanIsUsable(resolvedAt: resolved, now: resolved.addingTimeInterval(900)))
+        #expect(PlaybackRules.prefetchedPlanMaxAge < 600)
     }
 
     @Test func prefetchNotForLastEpisode() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 2, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 2, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
     }
 
     @Test func prefetchNotTwice() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: 1, prefetchInFlight: false
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: 1, prefetchInFlight: false
         ) == nil)
         #expect(PlaybackRules.prefetchIndex(
-            position: 95, duration: 100, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: true
+            position: 95, duration: 100, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: true
         ) == nil)
     }
 
     @Test func prefetchNotAtZeroDuration() {
         #expect(PlaybackRules.prefetchIndex(
-            position: 0, duration: 0, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
+            position: 0, duration: 0, lead: PlaybackRules.fullScreenPrefetchLead, currentIndex: 0, episodeCount: 3, prefetchedIndex: nil, prefetchInFlight: false
         ) == nil)
     }
 

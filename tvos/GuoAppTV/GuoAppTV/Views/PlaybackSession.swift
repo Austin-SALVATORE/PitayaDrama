@@ -37,8 +37,12 @@ final class PlaybackSession: ObservableObject {
     private var lastPlayedPosition = 0.0
     /// 当前这集的播放地址是在本机播放服务的第几代时拿到的（见 GatewayGeneration）。
     private var planGeneration = GatewayGeneration()
-    /// 下一集预取好的播放计划（还剩 60 秒时后台解析好，切集时直接用）。
+    /// 还剩多少秒时预取下一集：默认 1.0.0 的 10 秒（推荐页 hero），全屏播放页传 60 秒（见 PlaybackRules）。
+    let prefetchLead: Double
+    /// 下一集预取好的播放计划（还剩 prefetchLead 秒时后台解析好，切集时直接用）。
     private var prefetchedPlan: PlaybackPlan?
+    /// 预取的计划是什么时候解析好的：放太久（PlaybackRules.prefetchedPlanMaxAge）就不用了。
+    private var prefetchedAt = Date.distantPast
     private var prefetchedGeneration = GatewayGeneration()
     /// 预取针对的分集下标（成功或失败都记录，避免失败后反复重试刷接口）。
     private var prefetchedIndex: Int?
@@ -49,7 +53,11 @@ final class PlaybackSession: ObservableObject {
     /// 只让最后一次加载起播（load() 在解析返回后检查取消）。
     private var loadTask: Task<Void, Never>?
 
-    init(drama: Drama, episodes: [Episode], startIndex: Int, startPosition: Double, store: Store, controller: PlayerController) {
+    init(
+        drama: Drama, episodes: [Episode], startIndex: Int, startPosition: Double, store: Store,
+        controller: PlayerController, prefetchLead: Double = PlaybackRules.defaultPrefetchLead
+    ) {
+        self.prefetchLead = prefetchLead
         self.drama = drama
         self.episodes = episodes
         self.store = store
@@ -134,7 +142,7 @@ final class PlaybackSession: ObservableObject {
         }
         error = nil
         let episode = episodes[currentIndex]
-        // 优先用预取好的计划（上一集还剩 60 秒时已后台解析好），
+        // 优先用预取好的计划（上一集还剩 prefetchLead 秒时已后台解析好），
         // 切集时免去再等解析地址，是衔接卡顿的主因之一。
         if prefetchedIndex == currentIndex {
             // 预取还在路上（解析慢于本集剩余时长）：等它回来再用，不要另起一次解析——
@@ -148,13 +156,18 @@ final class PlaybackSession: ObservableObject {
             prefetchedIndex = nil
             warmTask?.cancel()
             warmTask = nil
-            if let cached {
+            if let cached, PlaybackRules.prefetchedPlanIsUsable(resolvedAt: prefetchedAt, now: Date()) {
                 plan = cached
                 planGeneration = prefetchedGeneration
                 controller.play(plan: cached, start: startPosition, danmakuEnabled: danmakuEnabled, speed: playbackSpeed)
                 return
             }
-            // 预取失败过：直接走正常解析（不重试预取）。
+            if let cached {
+                // 放太久了，核心可能已把它的播放会话当闲置丢掉：释放、重新解析。
+                DiagnosticLog.record("prefetched plan discarded after \(Int(Date().timeIntervalSince(prefetchedAt))) s")
+                Task { try? await CoreClient.shared.release(session: cached.session) }
+            }
+            // 预取失败过或放太久：直接走正常解析（不重试预取）。
         }
         do {
             // 代数在要地址之前记（见 GatewayRecovery.shouldRestart）。
@@ -241,12 +254,13 @@ final class PlaybackSession: ObservableObject {
         saveProgress(position: position, duration: duration)
     }
 
-    /// 当前集还剩 60 秒时，后台解析下一集播放地址（预取），解析成功再预热媒体通道。
+    /// 当前集还剩 prefetchLead 秒时，后台解析下一集播放地址（预取），解析成功再预热媒体通道。
     /// 切集时直接用预取好的计划，免去再等解析地址。
     private func maybePrefetchNext(position: Double, duration: Double) {
         guard let nextIndex = PlaybackRules.prefetchIndex(
             position: position,
             duration: duration,
+            lead: prefetchLead,
             currentIndex: currentIndex,
             episodeCount: episodes.count,
             prefetchedIndex: prefetchedIndex,
@@ -268,6 +282,7 @@ final class PlaybackSession: ObservableObject {
                 return
             }
             prefetchedGeneration = generation
+            prefetchedAt = Date()
             prefetchedPlan = plan
             warmUpNextMedia(plan: plan)
         }
