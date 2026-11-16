@@ -120,6 +120,13 @@ struct DetailView: View {
                     // 详情里的分集数作为追剧更新的基准（与 followCheck 同一种计数）。
                     store.toggleFollow(drama, knownEpisodes: detail?.episodes.count)
                 }
+                if displayDrama.source == "hongguo" {
+                    TVSecondaryLink(
+                        title: "出品方",
+                        icon: "building.2",
+                        value: ProducerRoute(drama: displayDrama)
+                    )
+                }
             }
         }
     }

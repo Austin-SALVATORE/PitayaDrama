@@ -1,7 +1,7 @@
 import Foundation
 
 /// 核心检查本机播放服务后的结论（核心补丁 ReviveNativeStream 的返回值，
-/// 见 tvos/CoreOverlay/core/tvos_stream_revive.go）。
+/// 见 fork/core/tvos_stream_revive.go）。
 enum GatewayRevival: String, Sendable {
     /// 核心还没就绪，或还没起过播（没有本机播放服务）。
     case idle

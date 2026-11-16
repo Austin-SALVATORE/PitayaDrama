@@ -31,6 +31,7 @@ struct Drama: Identifiable, Hashable, Codable {
     var heat: String
     var views: String
     var onlineDate: String
+    var producer: String
     var tags: [String]
     var releaseStatus: String
     /// 评分（核心的 metadata 补全；旧版存下的剧没有这个字段，可选）。
@@ -57,6 +58,7 @@ struct Drama: Identifiable, Hashable, Codable {
         heat = dict["heat"].map { "\($0)" } ?? ""
         views = dict["views"].map { "\($0)" } ?? ""
         onlineDate = stringValue(dict, "onlineDate")
+        producer = stringValue(dict, "producer")
         tags = stringList(dict, "tags")
         releaseStatus = stringValue(dict, "releaseStatus")
         let scoreText = stringValue(dict, "score")
@@ -78,6 +80,7 @@ struct Drama: Identifiable, Hashable, Codable {
             "heat": heat,
             "views": views,
             "onlineDate": onlineDate,
+            "producer": producer,
             "tags": tags,
             "releaseStatus": releaseStatus,
         ]
@@ -142,6 +145,24 @@ struct DramaDetail {
             return Episode(raw: row, fallback: index + 1)
         }
         warning = stringValue(dict, "warning")
+    }
+}
+
+/// 出品方页的导航路由值：与 Drama 一样走值链接 + navigationDestination
+/// 注册。不要用闭包目标链接跳出品方页——tvOS 16 上它会被父视图重绘
+/// 重复触发，把出品方页再盖到目标页上面。
+struct ProducerRoute: Hashable {
+    let drama: Drama
+}
+
+struct ProducerWorks {
+    let producer: String
+    let items: [Drama]
+
+    init(dict: [String: Any]) {
+        producer = stringValue(dict, "producer")
+        let rows = dict["items"] as? [Any] ?? []
+        items = rows.compactMap { ($0 as? [String: Any]).map(Drama.init(dict:)) }
     }
 }
 

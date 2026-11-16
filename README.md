@@ -52,6 +52,11 @@
   `git submodule status` 为准（`CHANGELOG.md` 每次同步都会记一笔）。本仓与上游共享
   Go 核心与 `DuanjuRequest` JSON 协议。
 - **播放协议**：播放地址、解密密钥等由 Go 核心通过 JSON 协议提供。
+- **本地核心改动**：`fork/` 是本仓对上游核心的覆盖层（出品方功能：解析
+  列表/搜索载荷的 `copyright`、新增 `producerWorks` 动作等），构建时由
+  `scripts/build_tvos.py` 先跑 `scripts/apply_fork_overlay.py` 合入
+  submodule 工作区；补丁打不上构建直接失败，需人工重排到新版上游。
+  不要直接改 `upstream/` 里的文件。
 
 ### 同步上游核心
 
@@ -111,6 +116,10 @@ python3 scripts/build_tvos.py [--all-sources]
 
 ### 安装到 Apple TV
 
+方法一（推荐）：
+部署[atvloadly](https://github.com/bitxeno/atvloadly)，通过atvloadly安装。
+
+方法二：
 需要在 Xcode › Settings › Accounts 登录 Apple ID（免费账号即可），并把 Apple TV 与本机配对
 （电视上打开 设置 › 遥控器与设备 › 遥控器 App 与设备，再在 Xcode › Window › Devices and
 Simulators 里配对）。然后：

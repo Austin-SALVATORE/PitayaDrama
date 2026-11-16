@@ -10,7 +10,7 @@
 		A100000000000000000000C5 /* GatewayRevival.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C6 /* GatewayRevival.swift */; };
 		A100000000000000000000C3 /* DiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C4 /* DiagnosticLog.swift */; };
 		A100000000000000000000C1 /* GatewayEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C2 /* GatewayEndpoint.swift */; };
-		A100000000000000000000BF /* DanmakuLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C0 /* DanmakuLayout.swift */; };
+		A100000000000000000000E1 /* DanmakuLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000E2 /* DanmakuLayout.swift */; };
 		A10000000000000000000075 /* DanmakuScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000076 /* DanmakuScheduler.swift */; };
 		A100000000000000000000BD /* WatchHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BE /* WatchHistoryView.swift */; };
 		A100000000000000000000BB /* LoadGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BC /* LoadGeneration.swift */; };
@@ -71,6 +71,7 @@
 		A10000000000000000000046 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000026 /* HomeView.swift */; };
 		A10000000000000000000047 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* SearchView.swift */; };
 		A10000000000000000000048 /* DetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* DetailView.swift */; };
+		A100000000000000000000C0 /* ProducerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BF /* ProducerView.swift */; };
 		A10000000000000000000049 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* PlayerView.swift */; };
 		A1000000000000000000004B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* SettingsView.swift */; };
 		A1000000000000000000004C /* PosterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* PosterView.swift */; };
@@ -85,7 +86,7 @@
 		A100000000000000000000C6 /* GatewayRevival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/GatewayRevival.swift; sourceTree = "<group>"; };
 		A100000000000000000000C4 /* DiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLog.swift; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* GatewayEndpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/GatewayEndpoint.swift; sourceTree = "<group>"; };
-		A100000000000000000000C0 /* DanmakuLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/DanmakuLayout.swift; sourceTree = "<group>"; };
+		A100000000000000000000E2 /* DanmakuLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/DanmakuLayout.swift; sourceTree = "<group>"; };
 		A10000000000000000000076 /* DanmakuScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/DanmakuScheduler.swift; sourceTree = "<group>"; };
 		A100000000000000000000BE /* WatchHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHistoryView.swift; sourceTree = "<group>"; };
 		A100000000000000000000BC /* LoadGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/LoadGeneration.swift; sourceTree = "<group>"; };
@@ -147,6 +148,7 @@
 		A10000000000000000000026 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		A10000000000000000000027 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		A10000000000000000000028 /* DetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailView.swift; sourceTree = "<group>"; };
+		A100000000000000000000BF /* ProducerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProducerView.swift; sourceTree = "<group>"; };
 		A10000000000000000000029 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002C /* PosterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PosterView.swift; sourceTree = "<group>"; };
@@ -234,7 +236,7 @@
 				A100000000000000000000BA /* HeroPauseIntent.swift */,
 				A100000000000000000000BC /* LoadGeneration.swift */,
 				A10000000000000000000076 /* DanmakuScheduler.swift */,
-				A100000000000000000000C0 /* DanmakuLayout.swift */,
+				A100000000000000000000E2 /* DanmakuLayout.swift */,
 				A100000000000000000000C2 /* GatewayEndpoint.swift */,
 				A100000000000000000000C4 /* DiagnosticLog.swift */,
 				A100000000000000000000C6 /* GatewayRevival.swift */,
@@ -249,6 +251,7 @@
 				A10000000000000000000026 /* HomeView.swift */,
 				A10000000000000000000027 /* SearchView.swift */,
 				A10000000000000000000028 /* DetailView.swift */,
+				A100000000000000000000BF /* ProducerView.swift */,
 				A10000000000000000000029 /* PlayerView.swift */,
 				A1000000000000000000002B /* SettingsView.swift */,
 				A1000000000000000000002C /* PosterView.swift */,
@@ -368,6 +371,7 @@
 				A10000000000000000000046 /* HomeView.swift in Sources */,
 				A10000000000000000000047 /* SearchView.swift in Sources */,
 				A10000000000000000000048 /* DetailView.swift in Sources */,
+				A100000000000000000000C0 /* ProducerView.swift in Sources */,
 				A10000000000000000000049 /* PlayerView.swift in Sources */,
 				A1000000000000000000004B /* SettingsView.swift in Sources */,
 				A1000000000000000000004C /* PosterView.swift in Sources */,
@@ -425,7 +429,7 @@
 				A100000000000000000000BB /* LoadGeneration.swift in Sources */,
 				A100000000000000000000BD /* WatchHistoryView.swift in Sources */,
 				A10000000000000000000075 /* DanmakuScheduler.swift in Sources */,
-				A100000000000000000000BF /* DanmakuLayout.swift in Sources */,
+				A100000000000000000000E1 /* DanmakuLayout.swift in Sources */,
 				A100000000000000000000C1 /* GatewayEndpoint.swift in Sources */,
 				A100000000000000000000C3 /* DiagnosticLog.swift in Sources */,
 				A100000000000000000000C5 /* GatewayRevival.swift in Sources */,

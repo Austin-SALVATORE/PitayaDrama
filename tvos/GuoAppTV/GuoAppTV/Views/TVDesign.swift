@@ -239,6 +239,39 @@ struct TVSecondaryButton: View {
     }
 }
 
+/// 次操作导航链接：外观与 TVSecondaryButton 完全一致，用于跳页型操作。
+/// 走值链接（与全 App 的 Drama 跳转同一机制），不要用闭包目标链接：
+/// tvOS 16 上闭包链接会被父视图重绘重复触发，把目标页盖住。
+struct TVSecondaryLink<Value: Hashable>: View {
+    let title: String
+    var icon: String? = nil
+    let value: Value
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationLink(value: value) {
+            HStack(spacing: 12) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .medium))
+                }
+                Text(title)
+                    .font(.system(size: 26, weight: .medium))
+            }
+            .padding(.horizontal, 36)
+            .padding(.vertical, 19)
+            .foregroundColor(TVTheme.textPrimary)
+            .background(Capsule().fill(focused ? TVTheme.surfaceBright : TVTheme.surface))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(focused ? 0.85 : 0), lineWidth: 3))
+        }
+        .buttonStyle(TVPressButtonStyle())
+        .focused($focused)
+        .scaleEffect(focused ? 1.05 : 1)
+        .animation(TVTheme.focusAnimation, value: focused)
+    }
+}
+
 // MARK: - 分区标题
 
 /// 内容分区标题：图标 + 标题 + 可选的右侧补充信息。
