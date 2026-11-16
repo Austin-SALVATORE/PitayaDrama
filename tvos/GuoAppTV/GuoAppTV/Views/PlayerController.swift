@@ -310,6 +310,11 @@ final class PlayerController: NSObject, ObservableObject {
             // 复用句柄换集：只更新逐集选项再 loadfile，跳过销毁与重新初始化
             // （mpv_initialize 连带 gpu-next / 硬解 / 音频初始化，是切集卡顿的大头）。
             applyPerFileOptions(handle, plan: plan, start: start, speed: speed)
+            // 与新建句柄时一样，先按「尺寸未知」摆放（hero 的竖屏面板），VIDEO_RECONFIG 后再按实际尺寸摆
+            // （hero 实时视频设计，见 docs/superpowers/specs/2026-11-08-hero-live-video-design.md）。
+            for (name, value) in framing?(nil) ?? [:] {
+                _ = mpv_set_property_string(handle, name, value)
+            }
             command(["loadfile", url.absoluteString, "replace"])
             isPaused = getFlag("pause")
             updateIdleTimer()
