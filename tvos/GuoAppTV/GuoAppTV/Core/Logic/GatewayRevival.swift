@@ -33,3 +33,19 @@ struct GatewayGeneration: Equatable, Sendable {
         return next
     }
 }
+
+/// 播放器报失败时，判断是不是本机播放服务丢失造成的，以及从哪里重新起播。
+enum GatewayRecovery {
+    /// 地址经过本机播放服务、且拿到地址之后服务丢过：这次失败算在服务头上，重新起播而不是换线路 / 报错。
+    /// planGeneration 要在向核心要地址之前记下——核心可能正好在服务丢失前后发出地址，
+    /// 记早了最多白白重新起播一次，记晚了会把一个作废的地址当成新的。
+    static func shouldRestart(planURL: String, planGeneration: GatewayGeneration, current: GatewayGeneration) -> Bool {
+        GatewayEndpoint(planURL: planURL) != nil && planGeneration != current
+    }
+
+    /// 重新起播的位置：本集最后真正播到的位置；还没播出画面就用原来的起播位置。
+    /// 不能用播放器当时的进度——失败后它会被清零。
+    static func restartPosition(lastPlayed: Double, startPosition: Double) -> Double {
+        lastPlayed > 0 ? lastPlayed : startPosition
+    }
+}

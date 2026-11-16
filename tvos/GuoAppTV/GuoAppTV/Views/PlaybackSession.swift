@@ -33,6 +33,8 @@ final class PlaybackSession: ObservableObject {
 
     private var startPosition: Double
     private var lastSavedPosition = -1.0
+    /// 本集最后真正播到的位置（播放器失败后它自己的进度会清零，重新起播要用这个）。
+    private var lastPlayedPosition = 0.0
     /// 当前这集的播放地址是在本机播放服务的第几代时拿到的（见 GatewayGeneration）。
     private var planGeneration = GatewayGeneration()
     /// 下一集预取好的播放计划（还剩 60 秒时后台解析好，切集时直接用）。
@@ -96,6 +98,7 @@ final class PlaybackSession: ObservableObject {
         currentIndex = index
         startPosition = 0
         lastSavedPosition = -1
+        lastPlayedPosition = 0
         startLoad()
     }
 
@@ -154,10 +157,11 @@ final class PlaybackSession: ObservableObject {
             // 预取失败过：直接走正常解析（不重试预取）。
         }
         do {
+            // 代数在要地址之前记（见 GatewayRecovery.shouldRestart）。
+            let generation = await CoreClient.shared.gatewayGeneration
             let resolved = try await CoreClient.shared.resolve(
                 drama: drama, episode: episode, quality: preferredQuality
             )
-            let generation = await CoreClient.shared.gatewayGeneration
             guard !Task.isCancelled else { return }
             plan = resolved
             planGeneration = generation
@@ -191,6 +195,7 @@ final class PlaybackSession: ObservableObject {
             currentIndex += 1
             startPosition = 0
             lastSavedPosition = -1
+            lastPlayedPosition = 0
             startLoad()
         } else {
             onReachedEnd?()
@@ -205,10 +210,9 @@ final class PlaybackSession: ObservableObject {
         await CoreClient.shared.reviveGateway()
         let generation = await CoreClient.shared.gatewayGeneration
         guard self.plan?.session == plan.session else { return }
-        if generation != planGeneration {
+        if GatewayRecovery.shouldRestart(planURL: plan.url, planGeneration: planGeneration, current: generation) {
             DiagnosticLog.record("playback restarted: the gateway was lost since this episode started")
-            let position = controller.progress.position
-            if position > 0 { startPosition = position }
+            startPosition = GatewayRecovery.restartPosition(lastPlayed: lastPlayedPosition, startPosition: startPosition)
             Task { try? await CoreClient.shared.release(session: plan.session) }
             startLoad()
             return
@@ -229,6 +233,7 @@ final class PlaybackSession: ObservableObject {
 
     func handleProgress(position: Double, duration: Double) {
         guard position > 0, duration > 0 else { return }
+        lastPlayedPosition = position
         maybePrefetchNext(position: position, duration: duration)
         // 与 Dart 侧一致：约每 5 秒落一次进度，避免频繁写盘。
         guard PlaybackRules.shouldSaveProgress(position: position, lastSaved: lastSavedPosition) else { return }
@@ -251,10 +256,10 @@ final class PlaybackSession: ObservableObject {
         let episode = episodes[nextIndex]
         prefetchTask = Task {
             defer { prefetchTask = nil }
+            let generation = await CoreClient.shared.gatewayGeneration
             guard let plan = try? await CoreClient.shared.resolve(
                 drama: drama, episode: episode, quality: preferredQuality
             ) else { return }
-            let generation = await CoreClient.shared.gatewayGeneration
             // 解析完成时若用户已不在触发那集（已切走/已退出），
             // 预取的计划用不上，释放其会话避免泄漏；
             // 若已经自动切到这一集（load() 在等这份计划），同样算命中。
