@@ -119,6 +119,21 @@ def build_signed_app(settings: DeploySettings, bundle_id: str, variant: BuildVar
     return application
 
 
+def launch_app(device_id: str, bundle_id: str, device_name: str) -> bool:
+    """安装之后顺手打开应用。打不开（最常见的是电视在休眠：「foreground app launch forbidden」）不算部署失败：
+    签名和安装都已完成，所以只提示、不报错退出，调用方（如每周续签的脚本）照常往下走。"""
+    result = subprocess.run(['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', device_id,
+                             '--terminate-existing', bundle_id], capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+    lines = [line.strip() for line in (result.stderr + '\n' + result.stdout).splitlines() if line.strip()]
+    reason = next((line for line in reversed(lines) if 'error' in line.lower() or 'forbidden' in line.lower()),
+                  lines[-1] if lines else f'devicectl 退出码 {result.returncode}')
+    print(f'应用已安装到 {device_name}，但没能打开：{reason}')
+    print('电视多半在休眠：唤醒电视后从主屏幕打开即可，签名与安装已经完成。')
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='签名构建并安装到 Apple TV 真机')
     parser.add_argument('--team', help='开发团队 Team ID')
@@ -150,8 +165,7 @@ def main() -> None:
     run(['xcrun', 'devicectl', 'device', 'install', 'app', '--device', device_id, str(application)])
     if not options.no_launch:
         print('==> 启动')
-        run(['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', device_id,
-             '--terminate-existing', bundle_id])
+        launch_app(device_id, bundle_id, settings.device)
     print('完成。免费账号的描述文件 7 天后过期，届时重跑本脚本即可。')
 
 
