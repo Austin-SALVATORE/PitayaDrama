@@ -270,33 +270,6 @@ struct DanmakuPage {
     }
 }
 
-// MARK: - 站源
-
-struct SourceSite: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let description: String
-
-    /// 与 Dart 侧 SourceSite.knownValues 对齐；站源列表由核心的 allSources 编译开关决定。
-    static func available(allSources: Bool) -> [SourceSite] {
-        let hongguo = SourceSite(id: "hongguo", name: "红果", description: "短剧 · 漫剧 · AI 剧")
-        guard allSources else { return [hongguo] }
-        return [
-            hongguo,
-            SourceSite(id: "dsd", name: "帝果", description: "分类视频 · 在线搜索"),
-            SourceSite(id: "sorani", name: "青空", description: "番剧 · 剧场动画 · 特摄"),
-            SourceSite(id: "guipian", name: "鬼片", description: "鬼片 · 电视剧 · 动漫"),
-            SourceSite(id: "hanxiaoquan", name: "韩小圈", description: "韩剧 · 韩国电影 · 综艺 · 动漫"),
-            SourceSite(id: "huangdou", name: "黄豆", description: "精选短剧"),
-            SourceSite(id: "huangju", name: "剧果", description: "热门 · 最新 · 分类短剧"),
-            SourceSite(id: "yeguo", name: "野果", description: "分类短剧 · 在线搜索"),
-            SourceSite(id: "huangguo-video", name: "黄果视频", description: "视频剧集"),
-            SourceSite(id: "huangguoai", name: "黄果 AI", description: "AI 短剧"),
-            SourceSite(id: "cloudfront", name: "黄果旧版", description: "旧 API 剧库"),
-        ]
-    }
-}
-
 /// 榜单：与 Dart 侧 RankingBoard 对齐，Go 核心 `rankingBoards` 返回。
 struct RankingBoard: Identifiable, Hashable {
     let id: String

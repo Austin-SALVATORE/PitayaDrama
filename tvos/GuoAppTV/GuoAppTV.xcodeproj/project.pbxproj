@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A100000000000000000000C5 /* GatewayRevival.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C6 /* GatewayRevival.swift */; };
+		A10000000000000000000A01 /* SourceSite.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000A02 /* SourceSite.swift */; };
 		A100000000000000000000C3 /* DiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C4 /* DiagnosticLog.swift */; };
 		A100000000000000000000C1 /* GatewayEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C2 /* GatewayEndpoint.swift */; };
 		A100000000000000000000E1 /* DanmakuLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000E2 /* DanmakuLayout.swift */; };
@@ -84,6 +85,7 @@
 
 /* Begin PBXFileReference section */
 		A100000000000000000000C6 /* GatewayRevival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/GatewayRevival.swift; sourceTree = "<group>"; };
+		A10000000000000000000A02 /* SourceSite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/SourceSite.swift; sourceTree = "<group>"; };
 		A100000000000000000000C4 /* DiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLog.swift; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* GatewayEndpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/GatewayEndpoint.swift; sourceTree = "<group>"; };
 		A100000000000000000000E2 /* DanmakuLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logic/DanmakuLayout.swift; sourceTree = "<group>"; };
@@ -240,6 +242,7 @@
 				A100000000000000000000C2 /* GatewayEndpoint.swift */,
 				A100000000000000000000C4 /* DiagnosticLog.swift */,
 				A100000000000000000000C6 /* GatewayRevival.swift */,
+				A10000000000000000000A02 /* SourceSite.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -433,6 +436,7 @@
 				A100000000000000000000C1 /* GatewayEndpoint.swift in Sources */,
 				A100000000000000000000C3 /* DiagnosticLog.swift in Sources */,
 				A100000000000000000000C5 /* GatewayRevival.swift in Sources */,
+				A10000000000000000000A01 /* SourceSite.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -128,24 +128,26 @@ actor CoreClient {
         return playbackSequence
     }
 
-    /// 初始化核心。返回核心编译时是否包含全部站源（--all-sources）。
-    func initialize() async throws -> Bool {
-        if initialized { return allSources }
+    /// 初始化核心，返回核心里可用的站源（构建时内置的站源模块）。
+    func initialize() async throws -> [SourceSite] {
+        if initialized { return sources }
         // tvOS 沙盒：真机上 Documents / Application Support 只读，只有
         // Caches 与 tmp 可写。核心的数据目录必须放在 Caches；代价是
         // 系统在存储不足时可能回收 Caches（缓存、海报、进度会丢失，
         // 属于 tvOS 的固有约束，下载等功能也因此不做）。
+        // 核心另要一个可随时清空的缓存目录（片库、榜单、封面），放在数据目录下的 core-cache。
         let directory = FileManager.default.urls(
             for: .cachesDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try await call(["action": "initialize", "directory": directory.path])
-        allSources = data["allSources"] as? Bool ?? false
+        let cache = directory.appendingPathComponent("core-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let data = try await call(["action": "initialize", "directory": directory.path, "cache": cache.path])
+        sources = SourceSite.list(fromCore: data["sources"] as? [Any] ?? [])
         initialized = true
-        return allSources
+        return sources
     }
 
-    private(set) var allSources = false
+    private(set) var sources: [SourceSite] = []
 
     func categories(source: String, force: Bool = false) async throws -> [Category] {
         if !force, let entry = categoriesCache[source], isFresh(entry.timestamp) {
@@ -204,15 +206,19 @@ actor CoreClient {
     }
 
     /// 核心存在本地的推荐（上次取到的那份，不联网、立刻返回）：推荐页与「大家都在看」启动时先显示它。
-    func cachedRecommendations(feed: String = "home_feed") async throws -> CatalogPage {
-        let data = try await call(["action": "cachedRecommendations", "category": feed])
+    /// 推荐与联想词都必须带 source，核心不再默认红果（不带时回「当前版本不包含此站源」）。
+    func cachedRecommendations(source: String, feed: String = "home_feed") async throws -> CatalogPage {
+        let data = try await call(["action": "cachedRecommendations", "source": source, "category": feed])
         return CatalogPage(dict: data)
     }
 
-    /// 红果推荐流（推荐页 hero）：核心自己缓存，返回累积的整份列表；more 时再往后取一页。
-    func recommendations(feed: String = "home_feed", more: Bool = false, force: Bool = false) async throws -> CatalogPage {
+    /// 推荐流（推荐页 hero）：核心自己缓存，返回累积的整份列表；more 时再往后取一页。
+    func recommendations(
+        source: String, feed: String = "home_feed", more: Bool = false, force: Bool = false
+    ) async throws -> CatalogPage {
         let data = try await call([
             "action": "recommendations",
+            "source": source,
             "category": feed,
             "command": more ? "more" : "",
             "force": force,
@@ -246,8 +252,8 @@ actor CoreClient {
         return result
     }
 
-    func suggestions(query: String) async throws -> [String] {
-        let data = try await call(["action": "suggestions", "query": query], session: "suggestions")
+    func suggestions(source: String, query: String) async throws -> [String] {
+        let data = try await call(["action": "suggestions", "source": source, "query": query], session: "suggestions")
         return (data["items"] as? [Any] ?? []).compactMap { $0 as? String }
     }
 

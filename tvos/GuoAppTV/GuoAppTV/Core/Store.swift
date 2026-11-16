@@ -7,18 +7,25 @@ import SwiftUI
 final class AppState: ObservableObject {
     @Published var initialized = false
     @Published var initializeError: String?
-    @Published var allSources = false
-    @Published var selectedSource = "hongguo"
+    /// 核心里可用的站源（initialize 回的 sources）。
+    @Published private(set) var sources: [SourceSite] = []
+    @Published var selectedSource = SourceSite.defaultID
+
+    /// 不止一个站源时才显示站源选择（剧场的站源行、「我的」里的站源分组）。
+    var offersSourceChoice: Bool { sources.count > 1 }
 
     /// 启动本地核心；已初始化时直接返回。失败时保留错误文案供界面重试。
     func bootstrap() async {
         guard !initialized else { return }
         initializeError = nil
         do {
-            allSources = try await CoreClient.shared.initialize()
-            if !SourceSite.available(allSources: allSources).contains(where: { $0.id == selectedSource }) {
-                selectedSource = "hongguo"
+            let sites = try await CoreClient.shared.initialize()
+            guard !sites.isEmpty else {
+                initializeError = "站源模块没有加载成功，请重新安装应用"
+                return
             }
+            sources = sites
+            selectedSource = SourceSite.selection(selectedSource, among: sites)
             initialized = true
         } catch {
             initializeError = error.localizedDescription
