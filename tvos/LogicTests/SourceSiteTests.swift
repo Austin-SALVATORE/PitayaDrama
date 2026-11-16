@@ -46,3 +46,24 @@ struct SourceSiteTests {
         #expect(SourceSite.selection("sorani", among: []) == "sorani")
     }
 }
+
+/// 核心一个站源都没有时的提示：带出核心给的模块错误，请用户重开应用（同一次运行里核心不会重新加载模块）。
+struct SourceUnavailableMessageTests {
+    @Test func includesTheCoreModuleErrors() {
+        let rows: [Any] = [
+            ["id": "hongguo", "name": "红果", "version": "1.0.2", "error": "模块未能加载，详见诊断日志"],
+            ["id": "broken", "name": "", "error": "读取 manifest.json 失败"],
+            ["id": "fine", "name": "正常的", "version": "1.0.0"],
+        ]
+        let message = SourceSite.unavailableMessage(moduleRows: rows)
+        #expect(message.contains("（红果：模块未能加载，详见诊断日志；broken：读取 manifest.json 失败）"))
+        #expect(!message.contains("正常的"))
+        #expect(message.contains("重新打开"))
+    }
+
+    @Test func withoutModuleErrorsStillAsksToReopen() {
+        let message = SourceSite.unavailableMessage(moduleRows: [])
+        #expect(message.hasPrefix("站源模块没有加载成功。"))
+        #expect(message.contains("完全退出应用"))
+    }
+}

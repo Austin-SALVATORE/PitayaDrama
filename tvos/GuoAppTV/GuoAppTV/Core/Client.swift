@@ -151,9 +151,15 @@ actor CoreClient {
             DiagnosticLog.record("bundled module refresh failed: \(error.localizedDescription)")
         }
         let data = try await call(["action": "initialize", "directory": directory.path, "cache": cache.path])
-        sources = SourceSite.list(fromCore: data["sources"] as? [Any] ?? [])
+        let sites = SourceSite.list(fromCore: data["sources"] as? [Any] ?? [])
+        guard !sites.isEmpty else {
+            // 不记已初始化：重试时再问一次核心。
+            let modules = (try? await call(["action": "modules"]))?["items"] as? [Any] ?? []
+            throw CoreError.message(SourceSite.unavailableMessage(moduleRows: modules))
+        }
+        sources = sites
         initialized = true
-        return sources
+        return sites
     }
 
     private(set) var sources: [SourceSite] = []

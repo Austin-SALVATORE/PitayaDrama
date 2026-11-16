@@ -20,10 +20,6 @@ final class AppState: ObservableObject {
         initializeError = nil
         do {
             let sites = try await CoreClient.shared.initialize()
-            guard !sites.isEmpty else {
-                initializeError = "站源模块没有加载成功，请重新安装应用"
-                return
-            }
             sources = sites
             selectedSource = SourceSite.selection(selectedSource, among: sites)
             initialized = true

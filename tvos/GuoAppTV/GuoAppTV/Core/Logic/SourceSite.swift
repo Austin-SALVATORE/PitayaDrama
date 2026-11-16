@@ -23,6 +23,21 @@ struct SourceSite: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// 核心一个可用的站源都没有时给用户看的话。moduleRows 是核心 modules 动作回的 items，带出其中的错误。
+    /// 核心只在进程启动时安装、加载模块，同一次运行里再 initialize 不会重新加载，所以要请用户重开应用。
+    static func unavailableMessage(moduleRows: [Any]) -> String {
+        let problems = moduleRows.compactMap { row -> String? in
+            guard let row = row as? [String: Any],
+                  let error = row["error"] as? String, !error.isEmpty
+            else { return nil }
+            let name = (row["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? row["id"] as? String ?? ""
+            return name.isEmpty ? error : "\(name)：\(error)"
+        }
+        let detail = problems.isEmpty ? "" : "（\(problems.joined(separator: "；"))）"
+        return "站源模块没有加载成功\(detail)。请完全退出应用（连按两下 TV 键，把本应用向上滑走）后重新打开；"
+            + "还不行再重新安装应用。"
+    }
+
     /// 选中的站源不在列表里时改选红果，列表里没有红果就选第一个；列表为空时不变。
     static func selection(_ current: String, among sites: [SourceSite]) -> String {
         guard !sites.contains(where: { $0.id == current }) else { return current }
