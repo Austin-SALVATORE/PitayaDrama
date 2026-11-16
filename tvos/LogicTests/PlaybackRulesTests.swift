@@ -54,3 +54,58 @@ struct PlaybackRulesTests {
         #expect(!PlaybackRules.disablesIdleTimer(hasPlayer: true, paused: false, keepsScreenAwake: false))
     }
 }
+
+/// 复用句柄换集时，上一集的进度不能报到新的一集名下。
+struct ProgressGateTests {
+    @Test func reportsOnlyWhileTheStartedFileIsOpen() {
+        var gate = ProgressGate()
+        #expect(!gate.isOpen)
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+    }
+
+    /// 手动选集：unload 立刻关上；旧文件的 END_FILE、新一集起播都不会提前打开，新文件打开后才报。
+    @Test func manualEpisodeSwitchWaitsForTheNewFile() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.fileLoaded()
+        gate.stop()
+        #expect(!gate.isOpen)
+        gate.fileEnded()
+        gate.fileLoaded()
+        #expect(!gate.isOpen, "a late event of the unloaded file must not reopen the gate")
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+    }
+
+    /// 自动连播（复用句柄 loadfile replace）：上一集的 END_FILE 晚到也只是关上，新文件打开后再报。
+    @Test func autoAdvanceIgnoresThePreviousFileEnding() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.fileLoaded()
+        gate.start()
+        #expect(!gate.isOpen)
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+    }
+
+    /// 上一集还没打开就换了：它晚到的 FILE_LOADED 后面跟着它的 END_FILE，门最后跟着新文件走。
+    @Test func lateEventsOfAnAbandonedFileEndClosed() {
+        var gate = ProgressGate()
+        gate.start()
+        gate.start()
+        gate.fileLoaded()
+        gate.fileEnded()
+        #expect(!gate.isOpen)
+        gate.fileLoaded()
+        #expect(gate.isOpen)
+    }
+}

@@ -95,6 +95,8 @@ final class PlayerController: NSObject, ObservableObject {
     /// stop()（退出播放页）之后不再起播：仍在解析中的异步加载晚回来时直接忽略，
     /// 避免已离开的页面在后台起一个没人管、也没人销毁的 mpv 句柄。
     private var stopped = false
+    /// 每秒的 tick 能不能上报进度（见 ProgressGate）：复用句柄时换集是异步的，不能把上一集的位置报给新的一集。
+    private var progressGate = ProgressGate()
 
     /// 容器视图建好后由 PlayerHostView 调用；play() 若先到则在此补启动。
     func attach(to container: PlayerHostContainerView) {
@@ -196,6 +198,7 @@ final class PlayerController: NSObject, ObservableObject {
     /// 新集解析好后 play() 复用句柄直接 loadfile，省掉销毁重建。
     /// 与 halt() 的区别：halt 连句柄一起销毁，出错停掉与图层更换时用。
     func unload() {
+        progressGate.stop()
         if mpv != nil {
             command(["stop"])
         }
@@ -315,6 +318,7 @@ final class PlayerController: NSObject, ObservableObject {
             for (name, value) in framing?(nil) ?? [:] {
                 _ = mpv_set_property_string(handle, name, value)
             }
+            progressGate.start()
             command(["loadfile", url.absoluteString, "replace"])
             isPaused = getFlag("pause")
             updateIdleTimer()
@@ -380,6 +384,7 @@ final class PlayerController: NSObject, ObservableObject {
         ))
         wakeupContext = contextPointer
         mpv_set_wakeup_callback(handle, mpvWakeup, contextPointer)
+        progressGate.start()
         command(["loadfile", url.absoluteString, "replace"])
         isPaused = getFlag("pause")
         startProgressTimer()
@@ -387,6 +392,7 @@ final class PlayerController: NSObject, ObservableObject {
     }
 
     private func destroyMpv() {
+        progressGate.stop()
         progressTimer?.invalidate()
         progressTimer = nil
         // 播放器销毁时恢复系统空闲计时器，屏保才能正常出现。
@@ -418,19 +424,28 @@ final class PlayerController: NSObject, ObservableObject {
             if eventId == MPV_EVENT_VIDEO_RECONFIG {
                 Task { @MainActor [weak self] in self?.videoReconfigured() }
             }
+            if eventId == MPV_EVENT_FILE_LOADED {
+                Task { @MainActor [weak self] in self?.progressGate.fileLoaded() }
+            }
             if eventId == MPV_EVENT_END_FILE {
                 let endFile = event.pointee.data
                     .assumingMemoryBound(to: mpv_event_end_file.self).pointee
                 if endFile.reason == MPV_END_FILE_REASON_EOF {
-                    Task { @MainActor [weak self] in self?.endedToken += 1 }
+                    Task { @MainActor [weak self] in
+                        self?.progressGate.fileEnded()
+                        self?.endedToken += 1
+                    }
                 } else if endFile.reason == MPV_END_FILE_REASON_ERROR {
                     let message = String(cString: mpv_error_string(endFile.error))
                     Task { @MainActor [weak self] in
+                        self?.progressGate.fileEnded()
                         self?.lastError = message
                         self?.failedToken += 1
                     }
+                } else {
+                    // STOP / QUIT / REDIRECT：只关上进度上报。
+                    Task { @MainActor [weak self] in self?.progressGate.fileEnded() }
                 }
-                // STOP / QUIT / REDIRECT：忽略。
             }
         }
     }
@@ -445,7 +460,7 @@ final class PlayerController: NSObject, ObservableObject {
     }
 
     private func tick() {
-        guard mpv != nil else { return }
+        guard mpv != nil, progressGate.isOpen else { return }
         let position = getDouble("time-pos")
         let duration = getDouble("duration")
         let paused = getFlag("pause")

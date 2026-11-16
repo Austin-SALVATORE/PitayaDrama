@@ -43,3 +43,31 @@ enum PlaybackRules {
         prefetchedIndex == target || prefetchedIndex == target + 1
     }
 }
+
+/// 播放器什么时候可以上报进度（PlayerController 每秒的 tick）。复用句柄换集时 stop / loadfile 都是异步的，
+/// 这段时间 mpv 的 time-pos 可能还是上一集的位置；报出去会把新的一集存成旧位置、按旧位置预取下一集。
+/// 所以只在 mpv 报出「这次加载的文件已打开」（FILE_LOADED）之后、这个文件结束（END_FILE）之前上报；
+/// 起播（start）先关上，卸下 / 停止（stop）后不再打开。mpv 的事件按发生顺序到达，上一集晚到的
+/// FILE_LOADED 后面一定跟着它自己的 END_FILE，不会把门留在打开。
+struct ProgressGate: Equatable, Sendable {
+    private(set) var isOpen = false
+    private var active = false
+
+    mutating func start() {
+        active = true
+        isOpen = false
+    }
+
+    mutating func fileLoaded() {
+        isOpen = active
+    }
+
+    mutating func fileEnded() {
+        isOpen = false
+    }
+
+    mutating func stop() {
+        active = false
+        isOpen = false
+    }
+}
