@@ -31,7 +31,8 @@ struct Drama: Identifiable, Hashable, Codable {
     var heat: String
     var views: String
     var onlineDate: String
-    var producer: String
+    /// 出品方（只有带出品方数据的核心才有；1.0.0 存下的剧没有这个字段，必须可选，否则追剧与进度整份读不出来）。
+    var producer: String?
     var tags: [String]
     var releaseStatus: String
     /// 评分（核心的 metadata 补全；旧版存下的剧没有这个字段，可选）。
@@ -58,7 +59,8 @@ struct Drama: Identifiable, Hashable, Codable {
         heat = dict["heat"].map { "\($0)" } ?? ""
         views = dict["views"].map { "\($0)" } ?? ""
         onlineDate = stringValue(dict, "onlineDate")
-        producer = stringValue(dict, "producer")
+        let producerText = stringValue(dict, "producer")
+        producer = producerText.isEmpty ? nil : producerText
         tags = stringList(dict, "tags")
         releaseStatus = stringValue(dict, "releaseStatus")
         let scoreText = stringValue(dict, "score")
@@ -80,12 +82,12 @@ struct Drama: Identifiable, Hashable, Codable {
             "heat": heat,
             "views": views,
             "onlineDate": onlineDate,
-            "producer": producer,
             "tags": tags,
             "releaseStatus": releaseStatus,
         ]
         if let vip { json["vip"] = vip }
         if let score { json["score"] = score }
+        if let producer { json["producer"] = producer }
         return json
     }
 }
